@@ -30,7 +30,7 @@ audit / conflicts / missing facts
 
 **Task 1/12 — OSM / Geofabrik production ingestion**
 
-Статус: **READY_FOR_EXTERNAL_LIVE_RUN**.
+Статус: **DONE**.
 
 Готово:
 - canonical source-of-truth: raw Geofabrik `.osm.pbf`;
@@ -45,12 +45,12 @@ audit / conflicts / missing facts
 - Docker worker;
 - локальные E2E и failure-тесты.
 
-Оставшийся gate: один настоящий внешний live-run на хосте с outbound DNS/HTTPS, затем повторный запуск для проверки идемпотентности. До этого Task 1 не считается DONE.
+Внешний gate закрыт 2026-09-22 в GitHub Actions (`ubuntu-24.04` + Docker): реальный PBF Geofabrik скачан и проверен, `verify-current` прошёл после обоих запусков, второй запуск подтвердил идемпотентное переиспользование того же release. Evidence: workflow run `35697364896`, release `8f7ab17b3321`.
 
 ## Источники в работе
 
 - OpenStreetMap / Geofabrik — пространственные данные и дорожная сеть.
-- Росстат Open Data / ОКТМО — официальная территориальная привязка. Адаптер существует, но следующий блок не начинается до закрытия Task 1.
+- Росстат Open Data / ОКТМО — официальная территориальная привязка. Адаптер существует; Task 2 может быть начат.
 
 ## Тесты
 
