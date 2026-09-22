@@ -16,3 +16,4 @@ data/geofabrik-pbf/
 .DS_Store
 .idea/
 .vscode/
+geofabrik-worker-data/
