@@ -36,6 +36,8 @@ jobs:
       - name: Capture first release state
         run: |
           set -euxo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/geofabrik-worker-data"
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/geofabrik-worker-data"
           root="$GITHUB_WORKSPACE/geofabrik-worker-data/geofabrik-pbf"
           release_id="$(jq -r .release_id "$root/current.json")"
           release="$root/releases/$release_id"
