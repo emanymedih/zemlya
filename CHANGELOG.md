@@ -29,7 +29,7 @@ OSM source-of-truth переключён на raw Geofabrik PBF. Реализо�
 - Docker worker;
 - storage preflight.
 
-Текущий статус: READY_FOR_EXTERNAL_LIVE_RUN. Task 1 не считается DONE до настоящего внешнего live-run и второго идемпотентного запуска.
+Статус после внешнего gate: DONE. Второй идемпотентный запуск подтверждён в GitHub Actions; локальный verify-current также прошёл.
 
 ## 2026-09-22 — Key Block Task 3
 

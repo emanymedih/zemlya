@@ -4,7 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from landradar.sources import BBox, OSMOverpassAdapter, GeofabrikIndexAdapter, parse_pbf_header
+from landradar.sources import (
+    BBox, OSMOverpassAdapter, GeofabrikIndexAdapter, RosstatOpenDataAdapter,
+    parse_pbf_header,
+)
 
 
 class SourceSmokeTests(unittest.TestCase):
@@ -53,6 +56,17 @@ class SourceSmokeTests(unittest.TestCase):
     @classmethod
     def _varint_field(cls, field_no: int, value: int) -> bytes:
         return cls._varint((field_no << 3) | 0) + cls._varint(value)
+
+    def test_rosstat_headerless_oktmo_schema(self):
+        payload = (
+            '"29";"502";"000";"101";"0";"2";"с Тестовое";;;"814";"3";'
+            '16.05.2025;01.01.2026\n'
+        ).encode("cp1251")
+        rows = RosstatOpenDataAdapter.parse_csv(payload)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["subject_code"], "29")
+        self.assertEqual(rows[0]["oktmo_code"], "29502000101")
+        self.assertEqual(rows[0]["name"], "с Тестовое")
 
     def test_parse_minimal_pbf_header(self):
         header_block = (

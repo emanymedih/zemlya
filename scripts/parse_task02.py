@@ -22,4 +22,4 @@ if not kaluga:
 Path("/data/task02-host/rosstat_oktmo_kaluga.json").write_text(
     json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
 )
-print(json.dumps({"ok": True, "records": len(rows), "kaluga_matches": len(kaluga)}, ensure_ascii=False))
+print(json.dumps({"ok": True, "records": len(rows), "subject_code_29_records": len(kaluga)}, ensure_ascii=False))

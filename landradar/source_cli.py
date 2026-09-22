@@ -43,6 +43,7 @@ def main() -> None:
     rs.add_argument("--raw-dir", default="data/raw")
     rs.add_argument("--output", default="rosstat_oktmo_kaluga.json")
     rs.add_argument("--filter", default="Калуж")
+    rs.add_argument("--subject-code", default=None)
 
     rs_h = sub.add_parser("rosstat-health", help="Run live Rosstat passport + CSV check")
     rs_h.add_argument("--raw-dir", default="data/raw")
@@ -91,7 +92,11 @@ def main() -> None:
     elif args.command == "rosstat-oktmo":
         adapter = RosstatOpenDataAdapter()
         dataset, snapshots = adapter.fetch_oktmo(raw_dir=args.raw_dir)
-        rows = adapter.filter_rows_containing(dataset.rows, args.filter)
+        rows = (
+            [row for row in dataset.rows if row.get("subject_code") == args.subject_code]
+            if args.subject_code
+            else adapter.filter_rows_containing(dataset.rows, args.filter)
+        )
         Path(args.output).write_text(json.dumps({
             "source": "Росстат",
             "dataset_id": dataset.dataset_id,
@@ -101,7 +106,8 @@ def main() -> None:
             "filter": args.filter,
             "records": rows,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"Rosstat rows matching {args.filter!r}: {len(rows)} -> {args.output}")
+        label = f"subject_code={args.subject_code!r}" if args.subject_code else f"filter={args.filter!r}"
+        print(f"Rosstat rows for {label}: {len(rows)} -> {args.output}")
     elif args.command == "rosstat-health":
         result = RosstatOpenDataAdapter().healthcheck(raw_dir=args.raw_dir)
         print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -50,7 +50,7 @@ audit / conflicts / missing facts
 ## Источники в работе
 
 - OpenStreetMap / Geofabrik — пространственные данные и дорожная сеть.
-- Росстат Open Data / ОКТМО — официальная территориальная привязка. Адаптер существует; Task 2 может быть начат.
+- Росстат Open Data / ОКТМО — официальная территориальная привязка. Task 2 live-ingestion выполнен; schema и subject-code filter проверены.
 
 ## Тесты
 
@@ -58,12 +58,14 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-Полный локальный рабочий suite текущей разработки: 20/20 PASS. В репозитории также лежат базовые smoke-тесты для ядра и PBF-контракта.
+Текущий локальный smoke-suite: 9/9 PASS. Внешний Geofabrik gate прошёл в GitHub Actions; локальный verify-current также подтверждён.
 
 ## Live worker
 
 ```bash
 sh deploy/geofabrik-worker/run-external-docker.sh
+# Windows PowerShell:
+./deploy/geofabrik-worker/run-external-docker.ps1
 ```
 
 Подробности: `docs/KEY_BLOCK_01.md`.
@@ -74,7 +76,7 @@ OSM может подтверждать наличие картографиро�
 
 ## Task 3 — execution environment
 
-Статус: **DONE**.
+Статус: **PARTIAL / BLOCKED**.
 
 Проверены Docker API, storage preflight, Windows Schannel HTTPS,
 container DNS/HTTPS и повторный preflight. Для Rosstat зафиксирован

@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 from typing import Any
 import csv
 import io
+import re
 
 from .base import HttpTransport, RequestsTransport, RawSnapshot, save_raw_snapshot
 
@@ -70,6 +71,39 @@ class RosstatOpenDataAdapter:
                 continue
         if text is None:
             raise ValueError("Unable to decode Rosstat CSV")
+
+        rows = list(csv.reader(io.StringIO(text), delimiter=";"))
+        if not rows:
+            raise ValueError("Rosstat CSV is empty")
+
+        # The official OKTMO export is a headerless 13-column table.
+        # Detect it by the four code-part widths and date columns.
+        first = [cell.strip().strip('"') for cell in rows[0]]
+        headerless = (
+            len(first) == 13
+            and len(first[0]) == 2
+            and len(first[1]) == 3
+            and len(first[2]) == 3
+            and len(first[3]) == 3
+            and re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", first[11] or "") is not None
+            and re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", first[12] or "") is not None
+        )
+        if headerless:
+            fields = [
+                "subject_code", "municipality_code", "territory_code",
+                "locality_code", "control_digit", "record_type",
+                "name", "parent_name", "additional_name",
+                "legacy_code", "legacy_control_digit", "valid_from", "valid_to",
+            ]
+            result = []
+            for values in rows:
+                if len(values) != len(fields):
+                    raise ValueError(f"Headerless Rosstat CSV row has {len(values)} fields; expected 13")
+                item = {field: value.strip() for field, value in zip(fields, values)}
+                item["oktmo_code"] = "".join(item[key] for key in fields[:4])
+                result.append(item)
+            return result
+
         sample = text[:8192]
         try:
             dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
@@ -121,13 +155,15 @@ class RosstatOpenDataAdapter:
     def healthcheck(self, *, raw_dir: str, timeout: float = 30.0) -> dict[str, Any]:
         try:
             dataset, snapshots = self.fetch_oktmo(raw_dir=raw_dir, timeout=timeout)
-            kaluga_rows = self.filter_rows_containing(dataset.rows, "Калуж")
+            kaluga_rows = [row for row in dataset.rows if row.get("subject_code") == "29"]
+            if not kaluga_rows:
+                kaluga_rows = self.filter_rows_containing(dataset.rows, "Калуж")
             return {
                 "source": self.source_key,
                 "ok": True,
                 "dataset_id": dataset.dataset_id,
                 "records": len(dataset.rows),
-                "kaluga_name_matches": len(kaluga_rows),
+                "kaluga_subject_records": len(kaluga_rows),
                 "data_url": dataset.data_url,
                 "snapshots": [s.to_dict() for s in snapshots],
             }
