@@ -1,0 +1,10 @@
+services:
+  geofabrik-ingest:
+    build:
+      context: ../..
+      dockerfile: deploy/geofabrik-worker/Dockerfile
+    environment:
+      LANDRADAR_GEOFABRIK_ROOT: /data/geofabrik-pbf
+    volumes:
+      - ./data:/data
+    restart: "no"
