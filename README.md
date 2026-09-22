@@ -71,3 +71,12 @@ sh deploy/geofabrik-worker/run-external-docker.sh
 ## Важно
 
 OSM может подтверждать наличие картографированной дороги и её тегов. OSM сам по себе не подтверждает юридическое право подъезда к земельному участку.
+
+## Task 3 — execution environment
+
+Статус: **DONE**.
+
+Проверены Docker API, storage preflight, Windows Schannel HTTPS,
+container DNS/HTTPS и повторный preflight. Для Rosstat зафиксирован
+source-aware transport: Windows выполняет TLS-загрузку, Docker —
+парсинг и нормализацию локального snapshot. Evidence: `docs/TASK_03_EVIDENCE.md`.

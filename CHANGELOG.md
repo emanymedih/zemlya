@@ -30,3 +30,9 @@ OSM source-of-truth переключён на raw Geofabrik PBF. Реализо�
 - storage preflight.
 
 Текущий статус: READY_FOR_EXTERNAL_LIVE_RUN. Task 1 не считается DONE до настоящего внешнего live-run и второго идемпотентного запуска.
+
+## 2026-09-22 — Key Block Task 3
+
+Закрыт gate рабочей execution-среды: Docker, storage, host HTTPS,
+container DNS/HTTPS и повторяемый preflight. Для Rosstat оформлен
+проверенный TLS fallback через Windows Schannel с Docker-парсингом.
