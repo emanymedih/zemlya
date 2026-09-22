@@ -58,13 +58,15 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
+Полный локальный рабочий suite текущей разработки: 20/20 PASS. В репозитории также лежат базовые smoke-тесты для ядра и PBF-контракта.
+
 ## Live worker
 
 ```bash
 ./deploy/geofabrik-worker/run-external-docker.sh
 ```
 
-Подробности: `docs/BLOCK_02_TASK_01_GEOFABRIK_PRODUCTION_INGEST.md`.
+Подробности: `docs/KEY_BLOCK_01.md`.
 
 ## Важно
 
