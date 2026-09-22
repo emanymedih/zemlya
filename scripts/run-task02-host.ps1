@@ -3,15 +3,16 @@ $repo='C:\Users\admla\zemlya'
 $base=Join-Path $repo 'geofabrik-worker-data\task02-host'
 $raw=Join-Path $base 'raw'
 New-Item -ItemType Directory -Force $raw | Out-Null
+$stamp=(Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
 $passportUrl='https://rosstat.gov.ru/opendata/7708234640-oktmo'
-$passport=Join-Path $raw 'rosstat-passport.html'
+$passport=Join-Path $raw ('rosstat-passport_'+$stamp+'.html')
 Invoke-WebRequest -Uri $passportUrl -UseBasicParsing -OutFile $passport
 $html=Get-Content $passport -Raw
 $links=[regex]::Matches($html,'(?:https?://[^"''<> ]+/)?data-[A-Za-z0-9_.-]+\.csv') | ForEach-Object Value | Sort-Object -Unique
 if(!$links){throw 'No Rosstat data CSV link found'}
 $href=$links | Sort-Object -Descending | Select-Object -First 1
 $dataUrl=([Uri]::new([Uri]$passportUrl,$href)).AbsoluteUri
-$csv=Join-Path $raw 'rosstat-oktmo.csv'
+$csv=Join-Path $raw ('rosstat-oktmo_'+$stamp+'.csv')
 Invoke-WebRequest -Uri $dataUrl -UseBasicParsing -OutFile $csv
 $snapshots=@()
 foreach($f in @($passport,$csv)){
