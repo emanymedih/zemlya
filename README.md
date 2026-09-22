@@ -63,7 +63,7 @@ python -m unittest discover -s tests -v
 ## Live worker
 
 ```bash
-./deploy/geofabrik-worker/run-external-docker.sh
+sh deploy/geofabrik-worker/run-external-docker.sh
 ```
 
 Подробности: `docs/KEY_BLOCK_01.md`.
