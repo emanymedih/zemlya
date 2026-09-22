@@ -31,7 +31,7 @@ jobs:
       - name: First live worker run
         run: |
           set -euxo pipefail
-          ./deploy/geofabrik-worker/run-external-docker.sh "$GITHUB_WORKSPACE/geofabrik-worker-data"             | tee first-live-run.log
+          sh ./deploy/geofabrik-worker/run-external-docker.sh "$GITHUB_WORKSPACE/geofabrik-worker-data"             | tee first-live-run.log
 
       - name: Capture first release state
         run: |
@@ -47,7 +47,7 @@ jobs:
       - name: Second live worker run
         run: |
           set -euxo pipefail
-          ./deploy/geofabrik-worker/run-external-docker.sh "$GITHUB_WORKSPACE/geofabrik-worker-data"             | tee second-live-run.log
+          sh ./deploy/geofabrik-worker/run-external-docker.sh "$GITHUB_WORKSPACE/geofabrik-worker-data"             | tee second-live-run.log
 
       - name: Verify idempotent reuse
         run: |
