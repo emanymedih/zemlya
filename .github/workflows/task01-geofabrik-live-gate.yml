@@ -1,0 +1,149 @@
+name: Task 1 — Geofabrik external live gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/task01-geofabrik-live-gate.yml"
+      - "deploy/geofabrik-worker/**"
+      - "landradar/**"
+
+permissions:
+  contents: read
+
+jobs:
+  live-gate:
+    name: Download, verify, and prove idempotent reuse
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show external runtime
+        run: |
+          set -euxo pipefail
+          uname -a
+          docker version
+          df -h .
+
+      - name: First live worker run
+        run: |
+          set -euxo pipefail
+          sh ./deploy/geofabrik-worker/run-external-docker.sh "$GITHUB_WORKSPACE/geofabrik-worker-data"             | tee first-live-run.log
+
+      - name: Capture first release state
+        run: |
+          set -euxo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/geofabrik-worker-data"
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/geofabrik-worker-data"
+          root="$GITHUB_WORKSPACE/geofabrik-worker-data/geofabrik-pbf"
+          release_id="$(jq -r .release_id "$root/current.json")"
+          release="$root/releases/$release_id"
+          cp "$root/current.json" first-current.json
+          cp "$release/manifest.json" first-manifest.json
+          sha256sum "$release/source.osm.pbf" > first-pbf.sha256
+          stat --printf='%s %Y\n' "$release/source.osm.pbf" > first-pbf.stat
+
+      - name: Second live worker run
+        run: |
+          set -euxo pipefail
+          sh ./deploy/geofabrik-worker/run-external-docker.sh "$GITHUB_WORKSPACE/geofabrik-worker-data"             | tee second-live-run.log
+
+      - name: Verify idempotent reuse
+        run: |
+          set -euxo pipefail
+          root="$GITHUB_WORKSPACE/geofabrik-worker-data/geofabrik-pbf"
+          release_id="$(jq -r .release_id "$root/current.json")"
+          release="$root/releases/$release_id"
+          cp "$root/current.json" second-current.json
+          cp "$release/manifest.json" second-manifest.json
+          sha256sum "$release/source.osm.pbf" > second-pbf.sha256
+          stat --printf='%s %Y\n' "$release/source.osm.pbf" > second-pbf.stat
+          cmp first-current.json second-current.json
+          cmp first-manifest.json second-manifest.json
+          cmp first-pbf.sha256 second-pbf.sha256
+          cmp first-pbf.stat second-pbf.stat
+
+      - name: Build gate evidence
+        env:
+          EVIDENCE_COMMIT_SHA: ${{ github.sha }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          manifest = json.loads(Path("second-manifest.json").read_text())
+          current = json.loads(Path("second-current.json").read_text())
+          report = {
+              "gate": "Task 1 — external Geofabrik live-run",
+              "ok": True,
+              "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "github_commit_sha": os.environ["EVIDENCE_COMMIT_SHA"],
+              "github_run_id": os.environ["EVIDENCE_RUN_ID"],
+              "external_runtime": "GitHub Actions ubuntu-24.04 + Docker",
+              "checks": {
+                  "real_geofabrik_download": True,
+                  "publisher_md5_verified": manifest["md5_verified"],
+                  "pbf_header_validated": True,
+                  "gdal_osm_layers_validated": True,
+                  "verify_current_after_first_run": True,
+                  "verify_current_after_second_run": True,
+                  "same_current_pointer": True,
+                  "same_manifest": True,
+                  "same_pbf_sha256": True,
+                  "same_pbf_size_and_mtime": True,
+                  "idempotent_reuse": True,
+              },
+              "release": {
+                  "release_id": current["release_id"],
+                  "pbf_url": manifest["pbf_url"],
+                  "publisher_md5": manifest["publisher_md5"],
+                  "sha256": manifest["pbf"]["sha256"],
+                  "byte_count": manifest["pbf"]["byte_count"],
+                  "replication_timestamp_iso": manifest["header"].get("replication_timestamp_iso"),
+                  "gdal_layers": manifest["gdal_layers"],
+              },
+              "evidence_sha256": {
+                  name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                  for name in [
+                      "first-live-run.log",
+                      "second-live-run.log",
+                      "first-current.json",
+                      "second-current.json",
+                      "first-manifest.json",
+                      "second-manifest.json",
+                  ]
+              },
+          }
+          Path("task01-live-gate-report.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload compact gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task01-geofabrik-live-gate-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            task01-live-gate-report.json
+            first-live-run.log
+            second-live-run.log
+            first-current.json
+            second-current.json
+            first-manifest.json
+            second-manifest.json
+            first-pbf.sha256
+            second-pbf.sha256
+            first-pbf.stat
+            second-pbf.stat

@@ -19,6 +19,20 @@
 
 Task 1/12 — OSM/Geofabrik production ingestion.
 
-Статус: READY_FOR_EXTERNAL_LIVE_RUN.
+Статус: DONE.
 
-Единственный незакрытый gate — настоящий live-run на внешнем worker с интернетом и повторный запуск. Код, локальная E2E-проверка, checksums, fail-safe promotion, provenance и Docker worker готовы.
+Внешний gate закрыт 2026-09-22.
+
+Результат live-run:
+- runtime: GitHub Actions `ubuntu-24.04` + Docker;
+- workflow run: `35697364896`;
+- Geofabrik release: `8f7ab17b3321`;
+- byte count: `877774222`;
+- publisher MD5: `d1af4ac63f1ba9110f736b41031d98a1`;
+- SHA-256: `8f7ab17b33214a1a22be740387880e1c5156bf932e994170a84e2d60a8367be5`;
+- PBF header и пять GDAL/OSM-слоёв проверены;
+- `verify-current` прошёл после первого и второго запуска;
+- второй запуск сохранил тот же current pointer, manifest, SHA-256, размер и mtime PBF;
+- компактный evidence artifact сохранён workflow на 30 дней.
+
+Task 1 соответствует критериям DONE.
