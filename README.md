@@ -45,7 +45,7 @@ audit / conflicts / missing facts
 - Docker worker;
 - локальные E2E и failure-тесты.
 
-Внешний gate закрыт 2026-09-22 в GitHub Actions (`ubuntu-24.04` + Docker): реальный PBF Geofabrik скачан и проверен, `verify-current` прошёл после обоих запусков, второй запуск подтвердил идемпотентное переиспользование того же release. Evidence: workflow run `35697364896`, release `8f7ab17b3321`.
+Внешний gate закрыт 2026-09-22 в GitHub Actions (`ubuntu-24.04` + Docker): release `8f7ab17b3321` проверен идемпотентно. Для рабочего контура 2026-09-23 загружен новый release `82d8e131284a`; его MD5 совпал с текущим publisher sidecar и прошли `verify-current`/GDAL checks. Старый workflow gate остаётся историческим доказательством; current-freshness проверяется при каждом pipeline-run.
 
 ## Источники в работе
 
@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-Текущий suite: 14/14 PASS. Включает pipeline-контракты, идемпотентность каталога, проверку связей и rollback failed run. Task 4 live E2E на PC обработал 3 raw artifacts, 3284 normalized records, 3290 entities и 3288 relations. Повторный прогон сохранил размеры каталога. Подробности: `docs/TASK_04_EVIDENCE.md`.
+Текущий suite: 22/22 PASS в Docker. Включает pipeline-контракты, идемпотентность каталога, свежесть источников, schema validation и rollback failed run. Последний live E2E обработал 3 raw artifacts, 3284 normalized records, 3290 entities и 3288 relations. Geofabrik MD5 совпал с publisher latest; Rosstat report показывает file version/возраст и две некорректные записи вне субъекта 29. Подробности: `docs/TASK_04_EVIDENCE.md`; план качества: `docs/CORE_DATA_QUALITY_PLAN.md`.
 
 ## Live worker
 

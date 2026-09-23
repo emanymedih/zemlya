@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from html.parser import HTMLParser
 from urllib.parse import urljoin
-from typing import Any
+from typing import Any, Callable
+from datetime import datetime
 import csv
 import io
 import re
@@ -11,6 +12,11 @@ import re
 from .base import HttpTransport, RequestsTransport, RawSnapshot, save_raw_snapshot
 
 OKTMO_PASSPORT_URL = "https://rosstat.gov.ru/opendata/7708234640-oktmo"
+ROSTAT_OPENDATA_TERMS_URL = "https://rosstat.gov.ru/opendata"
+ROSTAT_OPENDATA_USE_TERMS = (
+    "Rosstat standard open-data terms: free reuse, including modification and "
+    "commercial use; preserve a link to the source. See terms URL."
+)
 
 
 class _CsvLinkParser(HTMLParser):
@@ -32,6 +38,13 @@ class RosstatDataset:
     passport_url: str
     data_url: str
     rows: list[dict[str, str]]
+    use_terms: str = ROSTAT_OPENDATA_USE_TERMS
+    use_terms_url: str = ROSTAT_OPENDATA_TERMS_URL
+
+    @property
+    def published_version(self) -> str | None:
+        match = re.search(r"data-(\d{8}T\d{4})", self.data_url)
+        return match.group(1) if match else None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -77,49 +90,50 @@ class RosstatOpenDataAdapter:
         if not rows:
             raise ValueError("Rosstat CSV is empty")
 
-        # The official OKTMO export is a headerless 13-column table.
-        # Detect it by the four code-part widths and date columns.
-        first = [cell.strip().strip('"') for cell in rows[0]]
-        headerless = (
-            len(first) == 13
-            and len(first[0]) == 2
-            and len(first[1]) == 3
-            and len(first[2]) == 3
-            and len(first[3]) == 3
-            and re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", first[11] or "") is not None
-            and re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", first[12] or "") is not None
-        )
-        if headerless:
-            fields = [
-                "subject_code", "municipality_code", "territory_code",
-                "locality_code", "control_digit", "record_type",
-                "name", "parent_name", "additional_name",
-                "legacy_code", "legacy_control_digit", "valid_from", "valid_to",
-            ]
-            result = []
-            for values in rows:
-                if len(values) != len(fields):
-                    raise ValueError(f"Headerless Rosstat CSV row has {len(values)} fields; expected 13")
-                item = {field: value.strip() for field, value in zip(fields, values)}
-                item["oktmo_code"] = "".join(item[key] for key in fields[:4])
-                result.append(item)
-            return result
-
-        sample = text[:8192]
-        try:
-            dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
-            reader = csv.DictReader(io.StringIO(text), dialect=dialect)
-        except csv.Error:
-            reader = csv.DictReader(io.StringIO(text), delimiter=";")
-        if not reader.fieldnames:
-            raise ValueError("Rosstat CSV has no header")
-        return [
-            {str(k).strip(): (v.strip() if isinstance(v, str) else "") for k, v in row.items() if k is not None}
-            for row in reader
+        fields = [
+            "subject_code", "municipality_code", "territory_code",
+            "locality_code", "control_digit", "record_type",
+            "name", "parent_name", "additional_name",
+            "legacy_code", "legacy_control_digit", "valid_from", "valid_to",
         ]
+        result: list[dict[str, str]] = []
+        widths = (2, 3, 3, 3)
+        for row_number, values in enumerate(rows, start=1):
+            if len(values) != len(fields):
+                raise ValueError(
+                    f"Rosstat OKTMO row {row_number} has {len(values)} fields; expected 13"
+                )
+            item = {field: value.strip() for field, value in zip(fields, values)}
+            for field, width in zip(fields[:4], widths):
+                if re.fullmatch(rf"\d{{{width}}}", item[field]) is None:
+                    raise ValueError(
+                        f"Rosstat OKTMO row {row_number}: invalid {field}={item[field]!r}"
+                    )
+            if re.fullmatch(r"\d", item["control_digit"]) is None:
+                raise ValueError(f"Rosstat OKTMO row {row_number}: invalid control digit")
+            if re.fullmatch(r"\d", item["record_type"]) is None:
+                raise ValueError(f"Rosstat OKTMO row {row_number}: invalid record type")
+            if not item["name"]:
+                raise ValueError(f"Rosstat OKTMO row {row_number}: empty name")
+            parsed_dates = []
+            for field in ("valid_from", "valid_to"):
+                try:
+                    parsed_dates.append(datetime.strptime(item[field], "%d.%m.%Y").date())
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Rosstat OKTMO row {row_number}: invalid {field}={item[field]!r}"
+                    ) from exc
+            if parsed_dates[0] > parsed_dates[1]:
+                item["_source_row_number"] = str(row_number)
+                item["_source_quality_issues"] = ["valid_from_after_valid_to"]
+            item["oktmo_code"] = "".join(item[key] for key in fields[:4])
+            result.append(item)
+        return result
 
     def fetch_dataset(self, *, dataset_id: str, passport_url: str, raw_dir: str,
-                      timeout: float = 30.0) -> tuple[RosstatDataset, list[RawSnapshot]]:
+                      timeout: float = 30.0,
+                      on_snapshot: Callable[[RawSnapshot], None] | None = None
+                      ) -> tuple[RosstatDataset, list[RawSnapshot]]:
         passport = self.transport.get(passport_url, headers={"Accept": "text/html"}, timeout=timeout)
         if passport.status_code != 200:
             raise RuntimeError(f"Rosstat passport HTTP {passport.status_code}: {passport.text[:300]}")
@@ -127,6 +141,8 @@ class RosstatOpenDataAdapter:
             source_key=f"{self.source_key}_{dataset_id}_passport",
             method="GET", response=passport, raw_dir=raw_dir, suffix="html",
         )
+        if on_snapshot:
+            on_snapshot(p_snapshot)
         data_url = self.resolve_latest_data_url(passport.text, passport.url)
         data = self.transport.get(data_url, headers={"Accept": "text/csv,*/*"}, timeout=timeout)
         if data.status_code != 200:
@@ -135,17 +151,22 @@ class RosstatOpenDataAdapter:
             source_key=f"{self.source_key}_{dataset_id}_data",
             method="GET", response=data, raw_dir=raw_dir, suffix="csv",
         )
+        if on_snapshot:
+            on_snapshot(d_snapshot)
         rows = self.parse_csv(data.content)
         if not rows:
             raise ValueError("Rosstat dataset is empty")
         return RosstatDataset(dataset_id, passport.url, data_url, rows), [p_snapshot, d_snapshot]
 
-    def fetch_oktmo(self, *, raw_dir: str, timeout: float = 30.0) -> tuple[RosstatDataset, list[RawSnapshot]]:
+    def fetch_oktmo(self, *, raw_dir: str, timeout: float = 30.0,
+                    on_snapshot: Callable[[RawSnapshot], None] | None = None
+                    ) -> tuple[RosstatDataset, list[RawSnapshot]]:
         return self.fetch_dataset(
             dataset_id="7708234640-oktmo",
             passport_url=OKTMO_PASSPORT_URL,
             raw_dir=raw_dir,
             timeout=timeout,
+            on_snapshot=on_snapshot,
         )
 
     @staticmethod
@@ -160,6 +181,12 @@ class RosstatOpenDataAdapter:
                 row for row in dataset.rows
                 if row.get("subject_code") == self.kaluga_subject_code
             ]
+            quality_issues = [
+                row for row in dataset.rows if row.get("_source_quality_issues")
+            ]
+            kaluga_issues = [
+                row for row in kaluga_rows if row.get("_source_quality_issues")
+            ]
             if not kaluga_rows:
                 raise ValueError(
                     f"Rosstat OKTMO dataset has no rows for official subject code {self.kaluga_subject_code}"
@@ -170,7 +197,24 @@ class RosstatOpenDataAdapter:
                 "dataset_id": dataset.dataset_id,
                 "records": len(dataset.rows),
                 "kaluga_subject_records": len(kaluga_rows),
+                "published_version": dataset.published_version,
+                "latest_advertised_file": True,
+                "quality_status": "warnings" if quality_issues else "clean",
+                "source_quality_issue_count": len(quality_issues),
+                "kaluga_quality_issue_count": len(kaluga_issues),
+                "quality_issue_samples": [
+                    {
+                        "source_row": row["_source_row_number"],
+                        "oktmo_code": row["oktmo_code"],
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                    }
+                    for row in quality_issues[:20]
+                ],
                 "data_url": dataset.data_url,
+                "use_terms": dataset.use_terms,
+                "use_terms_url": dataset.use_terms_url,
+                "source_attribution": dataset.passport_url,
                 "snapshots": [s.to_dict() for s in snapshots],
             }
         except Exception as exc:

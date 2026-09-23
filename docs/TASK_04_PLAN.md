@@ -45,7 +45,9 @@ checksum и путь.
 - каждая normalized record ссылается на raw artifact и schema version;
 - каждая entity и relation имеет устойчивый идентификатор и evidence;
 - relation без известных endpoint/evidence не проходит validation;
-- повторный запуск не увеличивает число уникальных artifacts/records/entities/relations;
+- повтор с теми же content hashes не создаёт повторных артефактов/записей/сущностей/связей;
+- новый raw snapshot с новым hash сохраняется отдельно как история источника;
+- pipeline-run по умолчанию требует совпадения локального Geofabrik MD5 с актуальным publisher sidecar; pinned stale run разрешается только явным флагом;
 - каждый запуск сохраняется отдельно и связан с использованными данными;
 - failed run не меняет указатель на последний успешный run;
 - machine-readable report содержит counts, source keys, hashes и run_id;
@@ -63,14 +65,19 @@ Task 4 также не добавляет LandScore, цены или прогн�
 - Реализованы контракты в `landradar/pipeline/contracts.py`, SQLite-каталог
   в `store.py` и объединяющий runner в `runner.py`.
 - Добавлены `pipeline-run`, PowerShell launcher и Docker E2E.
-- Финальный live run: `5bbcfa06-181b-403d-8ad0-6329ba4a1466`; 3 raw
+- Финальный live run: `73ba6438-1801-4111-855f-90ea2d74165f`; 3 raw
   artifacts, 3284 normalized records, 3290 entities, 3288 relations.
-- Повторный прогон создал отдельный run и не увеличил число уникальных
-  записей/сущностей/связей. Изменившиеся HTML snapshots сохранены по хэшу.
-- SQLite содержит 3 успешных и 1 неуспешный run; последний оставил
-  `current_run_id` на последнем успешном run. Проверены rollback и TLS.
-- Docker suite: 14/14 PASS. Подробные счётчики и hashes —
-  `docs/TASK_04_EVIDENCE.md`.
+- Повтор с прежними CSV/PBF повторно использует их content IDs. Новые байты
+  HTML паспорта добавляются как отдельные raw snapshots; domain catalog при этом
+  не меняется. Это ожидаемое поведение content-addressed provenance.
+- Fail-closed stale-check и тестовые сбои сохраняют `current_run_id` на
+  последнем успешном run; неуспешные входные snapshots привязываются к failed run.
+  Проверены rollback и TLS.
+- Docker suite после корректировок: 22/22 PASS. Текущий Geofabrik PBF
+  сравнен с publisher MD5 и проверен по SHA-256, header/GDAL; pipeline сообщает
+  возраст Rosstat-файла и две source-quality anomalies вне subject 29.
+- Чистый default data-path launcher, атомарные JSON/snapshot writes и dirty
+  build-version marker добавлены; точные данные — `docs/TASK_04_EVIDENCE.md`.
 
 Задача закрыта в пределах заявленной границы: полный импорт OSM features,
 пространственный join участков и дорог остаются в Task 5.

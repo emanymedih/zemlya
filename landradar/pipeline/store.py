@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import sqlite3
 
-from .contracts import PipelineBundle, PipelineRun, canonical_json, stable_id, utc_now
+from .contracts import PipelineBundle, PipelineRun, RawArtifact, canonical_json, stable_id, utc_now
 
 
 _SCHEMA = """
@@ -156,11 +156,14 @@ class PipelineStore:
                 (run.run_id,),
             )
         return summary
-    def record_failure(self, run: PipelineRun, error: Exception) -> None:
+    def record_failure(self, run: PipelineRun, error: Exception,
+                       artifacts: list[RawArtifact] | None = None) -> None:
         finished = utc_now()
         summary = {
             "run_id": run.run_id, "status": "failed",
             "error_type": type(error).__name__, "error": str(error),
+            "source_summary": run.summary,
+            "input_artifact_ids": sorted({item.artifact_id for item in (artifacts or [])}),
         }
         with self.connection:
             self.connection.execute(
@@ -169,6 +172,17 @@ class PipelineStore:
                  canonical_json(sorted(set(run.source_keys))), canonical_json(summary),
                  f"{type(error).__name__}: {error}"),
             )
+            for item in artifacts or []:
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO raw_artifacts VALUES(?,?,?,?,?,?,?,?,?)",
+                    (item.artifact_id, item.source_key, item.dataset_id, item.url,
+                     item.fetched_at, item.status_code, item.byte_count, item.sha256,
+                     item.local_path),
+                )
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO run_artifacts VALUES(?,?)",
+                    (run.run_id, item.artifact_id),
+                )
 
     def counts(self) -> dict[str, int]:
         return {

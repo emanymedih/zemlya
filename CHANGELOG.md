@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-23 — аудит качества Tasks 1–4
+
+Добавлены checksum-based freshness gate для Geofabrik, publication version и
+возраст файла Росстата в pipeline report, построчная schema validation и
+отчёт двух source anomalies без эвристического исправления. Failed runs
+сохраняют raw evidence и не меняют current pointer; JSON/snapshots пишутся
+атомарно; Docker tests запускаются на push/PR. Новый Geofabrik release
+`82d8e131284a` проверен live; suite 22/22 PASS. План Tasks 5–12:
+`docs/CORE_DATA_QUALITY_PLAN.md`.
+
 ## 2026-09-23 — Task 4 unified data pipeline
 
 Добавлены общие raw/normalized/entity/relation contracts, SQLite provenance

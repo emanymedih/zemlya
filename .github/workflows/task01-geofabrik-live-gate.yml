@@ -2,11 +2,6 @@ name: Task 1 — Geofabrik external live gate
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".github/workflows/task01-geofabrik-live-gate.yml"
-      - "deploy/geofabrik-worker/**"
-      - "landradar/**"
 
 permissions:
   contents: read

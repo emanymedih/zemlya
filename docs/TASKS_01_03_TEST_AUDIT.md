@@ -48,3 +48,34 @@ Result: PASS / DONE.
 Task 1: DONE.
 Task 2: DONE, corrected, E2E-tested and regression-backed.
 Task 3: DONE with direct verified container TLS.
+
+
+## Повторный аудит Tasks 1–4 — 2026-09-23
+
+- Task 1: новый current release `82d8e131284a` скачан и проверен; publisher
+  MD5 и локальный MD5 совпали (`e6eefa1f1574bbce61ed1566f9356ab0`), SHA-256,
+  PBF header и 5 GDAL layers подтверждены. Строгий pipeline сравнивает sidecar
+  снова непосредственно перед использованием; старый release остаётся только
+  историческим доказательством GitHub gate.
+- Task 2: schema/field validation прошли для 186533 строк. Обнаружены две
+  инверсии интервала дат в subject 95, вне выбранной Калужской области (29).
+  Raw source сохранён; строки помечаются, не исправляются эвристикой; выбранный
+  субъект блокируется, если в нём есть такие строки. Возраст latest Rosstat
+  файла показывается: версия 20260901T1609, 22 календарных дня на запуск.
+- Task 3: прямой HTTPS/TLS был повторно использован внутри последнего live
+  Docker pipeline; проверка сертификатов/hostname не отключалась. Ранее
+  измеренный запас диска превышал preflight минимум на несколько сотен GB.
+- Task 4: current run `73ba6438-1801-4111-855f-90ea2d74165f` завершился
+  успешно: 3 raw artifacts, 3284 normalized records, 3290 entities, 3288
+  relations; target subject содержит 3283 записи. Неуспешный source parse
+  сохранён как failed run без продвижения current pointer.
+- Финальная локальная Docker regression suite: **22/22 PASS**; проверены
+  row validation, freshness helper, code version, failed raw artifact links,
+  idempotence и rollback. Workflow на push/PR добавляет постоянный CI gate.
+- Обнаружен и исправлен эксплуатационный дефект: Task 4 launcher строил
+  default data path из текущего каталога, из-за чего запуск вне repo root
+  находил пустой volume. Теперь путь вычисляется от repo root.
+
+Вывод: Tasks 1–4 технически пригодны в объявленной границе; качество источника
+Росстат не идеально, это теперь явно видно как 2 source warnings. Готовность
+означает воспроизводимый ingestion/provenance, не безошибочность upstream data.

@@ -2,10 +2,33 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+import tempfile
 
 from .sources import BBox, OSMOverpassAdapter, OSMGeofabrikCatalogAdapter, GeofabrikGpkgIngestor, GeofabrikPbfIngestor, RosstatOpenDataAdapter
 from .pipeline import UnifiedPipelineRunner
+
+
+def write_json_atomic(path: str | Path, payload: dict) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        prefix=target.name + ".", suffix=".tmp", dir=target.parent,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--raw-dir", default="data/raw/pipeline/rosstat")
     pipeline.add_argument("--database", default="data/normalized/landradar.sqlite")
     pipeline.add_argument("--subject-code", default="29")
+    pipeline.add_argument(
+        "--allow-stale-geofabrik", action="store_true",
+        help="Allow a verified local PBF when publisher latest MD5 has changed",
+    )
     pipeline.add_argument("--report", default=None)
     return parser
 
@@ -71,12 +98,12 @@ def main() -> None:
     if args.command == "osm-roads":
         adapter = OSMOverpassAdapter()
         roads, snapshot = adapter.fetch_roads(BBox(*args.bbox), raw_dir=args.raw_dir)
-        Path(args.output).write_text(json.dumps({
+        write_json_atomic(args.output, {
             "source": "OpenStreetMap",
             "attribution": "© OpenStreetMap contributors; ODbL",
             "snapshot": snapshot.to_dict(),
             "records": [r.to_dict() for r in roads],
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        })
         print(f"OSM roads: {len(roads)} -> {args.output}")
     elif args.command == "osm-health":
         result = OSMOverpassAdapter().healthcheck(raw_dir=args.raw_dir)
@@ -119,16 +146,43 @@ def main() -> None:
             selection = {"text_filter": args.filter}
         if not rows:
             raise SystemExit(f"No Rosstat OKTMO rows matched {selection}")
-        Path(args.output).write_text(json.dumps({
+        invalid_rows = [row for row in rows if row.get("_source_quality_issues")]
+        if invalid_rows:
+            first = invalid_rows[0]
+            raise SystemExit(
+                "Selected Rosstat rows contain invalid validity interval: "
+                f"row={first['_source_row_number']} code={first['oktmo_code']} "
+                f"valid_from={first['valid_from']} valid_to={first['valid_to']}"
+            )
+        quality_issues = [
+            row for row in dataset.rows if row.get("_source_quality_issues")
+        ]
+        write_json_atomic(args.output, {
             "source": "Росстат",
             "dataset_id": dataset.dataset_id,
             "passport_url": dataset.passport_url,
             "data_url": dataset.data_url,
+            "published_version": dataset.published_version,
+            "latest_advertised_file": True,
+            "source_quality_issue_count": len(quality_issues),
+            "source_quality_issue_samples": [
+                {
+                    "source_row": row["_source_row_number"],
+                    "oktmo_code": row["oktmo_code"],
+                    "issue": row["_source_quality_issues"][0],
+                    "valid_from": row["valid_from"],
+                    "valid_to": row["valid_to"],
+                }
+                for row in quality_issues[:20]
+            ],
+            "use_terms": dataset.use_terms,
+            "use_terms_url": dataset.use_terms_url,
+            "source_attribution": dataset.passport_url,
             "snapshots": [s.to_dict() for s in snapshots],
             "selection": selection,
             "all_records_count": len(dataset.rows),
             "records": rows,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        })
         label = next(iter(selection.items()))
         print(f"Rosstat rows for {label[0]}={label[1]!r}: {len(rows)} -> {args.output}")
     elif args.command == "rosstat-health":
@@ -142,13 +196,10 @@ def main() -> None:
             rosstat_raw_dir=args.raw_dir,
             database_path=args.database,
             subject_code=args.subject_code,
+            require_latest_geofabrik=not args.allow_stale_geofabrik,
         ).run()
         if args.report:
-            report_path = Path(args.report)
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = report_path.with_suffix(report_path.suffix + ".tmp")
-            temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-            temporary.replace(report_path)
+            write_json_atomic(args.report, report)
         print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

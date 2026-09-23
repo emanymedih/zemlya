@@ -1,0 +1,27 @@
+name: Core unit tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Dockerized core regression suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build runtime image
+        run: |
+          docker build --build-arg "LANDRADAR_CODE_VERSION=git:${GITHUB_SHA}" \
+            -f deploy/geofabrik-worker/Dockerfile -t zemlya-radar:ci .
+      - name: Run core tests
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" -w /workspace \
+            --entrypoint python zemlya-radar:ci \
+            -m unittest discover -s tests -v

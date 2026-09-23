@@ -33,5 +33,8 @@ COPY deploy/geofabrik-worker/run.sh /app/run.sh
 RUN chmod 0755 /app/run.sh \
     && python -c "import pyogrio; assert pyogrio.list_drivers().get('OSM') == 'r', pyogrio.list_drivers().get('OSM')"
 
+ARG LANDRADAR_CODE_VERSION=unknown
+ENV LANDRADAR_CODE_VERSION=${LANDRADAR_CODE_VERSION}
+
 VOLUME ["/data"]
 ENTRYPOINT ["/app/run.sh"]

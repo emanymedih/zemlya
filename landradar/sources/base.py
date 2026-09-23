@@ -6,6 +6,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 import json
+import os
+import tempfile
 
 import requests
 
@@ -90,15 +92,31 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _atomic_write(path: Path, content: bytes) -> None:
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def save_raw_snapshot(*, source_key: str, method: str, response: HttpResponse,
                       raw_dir: str | Path, suffix: str, request_payload: str | None = None) -> RawSnapshot:
     raw_dir = Path(raw_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
     digest = sha256(response.content).hexdigest()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     filename = f"{source_key}_{stamp}_{digest[:12]}.{suffix.lstrip('.')}"
     raw_path = raw_dir / filename
-    raw_path.write_bytes(response.content)
+    _atomic_write(raw_path, response.content)
 
     request_digest = sha256(request_payload.encode("utf-8")).hexdigest() if request_payload is not None else None
     snapshot = RawSnapshot(
@@ -115,5 +133,6 @@ def save_raw_snapshot(*, source_key: str, method: str, response: HttpResponse,
         request_payload=request_payload,
     )
     meta_path = raw_path.with_suffix(raw_path.suffix + ".meta.json")
-    meta_path.write_text(json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    metadata = json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
+    _atomic_write(meta_path, metadata)
     return snapshot

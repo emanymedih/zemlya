@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 import json
+import os
 import uuid
 
 
@@ -103,7 +104,9 @@ class PipelineRun:
     started_at: str = field(default_factory=utc_now)
     finished_at: str | None = None
     status: str = "running"
-    code_version: str = "task04-v1"
+    code_version: str = field(
+        default_factory=lambda: os.environ.get("LANDRADAR_CODE_VERSION", "unknown")
+    )
     source_keys: list[str] = field(default_factory=list)
     summary: dict[str, Any] = field(default_factory=dict)
 
