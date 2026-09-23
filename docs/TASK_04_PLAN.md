@@ -65,7 +65,7 @@ Task 4 также не добавляет LandScore, цены или прогн�
 - Реализованы контракты в `landradar/pipeline/contracts.py`, SQLite-каталог
   в `store.py` и объединяющий runner в `runner.py`.
 - Добавлены `pipeline-run`, PowerShell launcher и Docker E2E.
-- Финальный live run: `73ba6438-1801-4111-855f-90ea2d74165f`; 3 raw
+- Финальный live run: `a751c04d-5c96-4850-a2e5-bfca771d5373`; 3 raw
   artifacts, 3284 normalized records, 3290 entities, 3288 relations.
 - Повтор с прежними CSV/PBF повторно использует их content IDs. Новые байты
   HTML паспорта добавляются как отдельные raw snapshots; domain catalog при этом

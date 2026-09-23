@@ -65,7 +65,7 @@ Task 3: DONE with direct verified container TLS.
 - Task 3: прямой HTTPS/TLS был повторно использован внутри последнего live
   Docker pipeline; проверка сертификатов/hostname не отключалась. Ранее
   измеренный запас диска превышал preflight минимум на несколько сотен GB.
-- Task 4: current run `73ba6438-1801-4111-855f-90ea2d74165f` завершился
+- Task 4: current run `a751c04d-5c96-4850-a2e5-bfca771d5373` завершился
   успешно: 3 raw artifacts, 3284 normalized records, 3290 entities, 3288
   relations; target subject содержит 3283 записи. Неуспешный source parse
   сохранён как failed run без продвижения current pointer.
