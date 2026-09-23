@@ -12,7 +12,7 @@ out = {
     "dataset_id": "7708234640-oktmo",
     "passport_url": meta["passport_url"],
     "data_url": meta["data_url"],
-    "filter": {"subject_code": "29", "subject_name": "Калужская область"},
+    "selection": {"subject_code": "29", "subject_name": "Калужская область"},
     "records": kaluga,
     "all_records_count": len(rows),
     "raw_snapshots": meta["snapshots"],

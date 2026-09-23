@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-Текущий локальный smoke-suite: 9/9 PASS. Внешний Geofabrik gate прошёл в GitHub Actions; локальный verify-current также подтверждён.
+Текущий smoke-suite: 10/10 PASS, включая regression-test на выбор Калужской области по официальному коду субъекта `29`. Внешний Geofabrik gate прошёл в GitHub Actions; локальный verify-current также подтверждён.
 
 ## Live worker
 
@@ -76,9 +76,12 @@ OSM может подтверждать наличие картографиро�
 
 ## Task 3 — execution environment
 
-Статус: **PARTIAL / BLOCKED**.
+Статус: **DONE**.
 
-Проверены Docker API, storage preflight, Windows Schannel HTTPS,
-container DNS/HTTPS и повторный preflight. Для Rosstat зафиксирован
-source-aware transport: Windows выполняет TLS-загрузку, Docker —
-парсинг и нормализацию локального snapshot. Evidence: `docs/TASK_03_EVIDENCE.md`.
+Docker API, storage, host HTTPS и прямой container HTTPS проверены для
+Geofabrik, Rosstat и GitHub. Для неполной серверной цепочки Rosstat runtime
+использует закреплённые root/intermediate CA в app-local bundle; TLS и
+hostname verification остаются включёнными. Полный Rosstat ingest теперь
+работает внутри контейнера и по умолчанию выбирает официальный код субъекта
+Калужской области `29`: 3283 строки из 186533. Evidence:
+`docs/TASK_03_EVIDENCE.md`.

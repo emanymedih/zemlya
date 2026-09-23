@@ -7,7 +7,7 @@ from pathlib import Path
 from .sources import BBox, OSMOverpassAdapter, OSMGeofabrikCatalogAdapter, GeofabrikGpkgIngestor, GeofabrikPbfIngestor, RosstatOpenDataAdapter
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Zemlya Radar — source connectors")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -42,13 +42,24 @@ def main() -> None:
     rs = sub.add_parser("rosstat-oktmo", help="Fetch current Rosstat OKTMO open dataset")
     rs.add_argument("--raw-dir", default="data/raw")
     rs.add_argument("--output", default="rosstat_oktmo_kaluga.json")
-    rs.add_argument("--filter", default="Калуж")
-    rs.add_argument("--subject-code", default=None)
+    selector = rs.add_mutually_exclusive_group()
+    selector.add_argument("--subject-code", default=None, help="Official 2-digit subject code; default: 29 (Kaluga)")
+    selector.add_argument("--filter", default=None, help="Explicit full-row text filter; use only for diagnostics")
 
     rs_h = sub.add_parser("rosstat-health", help="Run live Rosstat passport + CSV check")
     rs_h.add_argument("--raw-dir", default="data/raw")
+    return parser
 
-    args = parser.parse_args()
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    args = build_parser().parse_args(argv)
+    if args.command == "rosstat-oktmo" and args.subject_code is None and args.filter is None:
+        args.subject_code = RosstatOpenDataAdapter.kaluga_subject_code
+    return args
+
+
+def main() -> None:
+    args = parse_args()
     if args.command == "osm-roads":
         adapter = OSMOverpassAdapter()
         roads, snapshot = adapter.fetch_roads(BBox(*args.bbox), raw_dir=args.raw_dir)
@@ -92,22 +103,26 @@ def main() -> None:
     elif args.command == "rosstat-oktmo":
         adapter = RosstatOpenDataAdapter()
         dataset, snapshots = adapter.fetch_oktmo(raw_dir=args.raw_dir)
-        rows = (
-            [row for row in dataset.rows if row.get("subject_code") == args.subject_code]
-            if args.subject_code
-            else adapter.filter_rows_containing(dataset.rows, args.filter)
-        )
+        if args.subject_code is not None:
+            rows = [row for row in dataset.rows if row.get("subject_code") == args.subject_code]
+            selection = {"subject_code": args.subject_code}
+        else:
+            rows = adapter.filter_rows_containing(dataset.rows, args.filter)
+            selection = {"text_filter": args.filter}
+        if not rows:
+            raise SystemExit(f"No Rosstat OKTMO rows matched {selection}")
         Path(args.output).write_text(json.dumps({
             "source": "Росстат",
             "dataset_id": dataset.dataset_id,
             "passport_url": dataset.passport_url,
             "data_url": dataset.data_url,
             "snapshots": [s.to_dict() for s in snapshots],
-            "filter": args.filter,
+            "selection": selection,
+            "all_records_count": len(dataset.rows),
             "records": rows,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        label = f"subject_code={args.subject_code!r}" if args.subject_code else f"filter={args.filter!r}"
-        print(f"Rosstat rows for {label}: {len(rows)} -> {args.output}")
+        label = next(iter(selection.items()))
+        print(f"Rosstat rows for {label[0]}={label[1]!r}: {len(rows)} -> {args.output}")
     elif args.command == "rosstat-health":
         result = RosstatOpenDataAdapter().healthcheck(raw_dir=args.raw_dir)
         print(json.dumps(result, ensure_ascii=False, indent=2))

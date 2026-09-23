@@ -39,6 +39,7 @@ class RosstatDataset:
 
 class RosstatOpenDataAdapter:
     source_key = "rosstat_opendata"
+    kaluga_subject_code = "29"
 
     def __init__(self, transport: HttpTransport | None = None):
         self.transport = transport or RequestsTransport()
@@ -155,9 +156,14 @@ class RosstatOpenDataAdapter:
     def healthcheck(self, *, raw_dir: str, timeout: float = 30.0) -> dict[str, Any]:
         try:
             dataset, snapshots = self.fetch_oktmo(raw_dir=raw_dir, timeout=timeout)
-            kaluga_rows = [row for row in dataset.rows if row.get("subject_code") == "29"]
+            kaluga_rows = [
+                row for row in dataset.rows
+                if row.get("subject_code") == self.kaluga_subject_code
+            ]
             if not kaluga_rows:
-                kaluga_rows = self.filter_rows_containing(dataset.rows, "Калуж")
+                raise ValueError(
+                    f"Rosstat OKTMO dataset has no rows for official subject code {self.kaluga_subject_code}"
+                )
             return {
                 "source": self.source_key,
                 "ok": True,

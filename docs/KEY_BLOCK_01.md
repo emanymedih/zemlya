@@ -15,7 +15,7 @@
 11. Повторная загрузка.
 12. Только после этого источники получают DONE.
 
-## Текущая задача
+## Состояние задач 1–3
 
 Task 1/12 — OSM/Geofabrik production ingestion.
 
@@ -36,3 +36,17 @@ Task 1/12 — OSM/Geofabrik production ingestion.
 - компактный evidence artifact сохранён workflow на 30 дней.
 
 Task 1 соответствует критериям DONE.
+
+### Task 2/12 — Росстат / ОКТМО
+
+Статус: **DONE**. Headerless-схема из 13 колонок зафиксирована явно;
+Калужская область выбирается по официальному коду субъекта `29`.
+Прямой container ingest: 186533 строк всего, 3283 строки региона.
+
+### Task 3/12 — execution environment
+
+Статус: **DONE**. Docker, storage, host/container DNS и HTTPS проверены.
+Прямой TLS к Rosstat работает через закреплённый app-local CA bundle при
+включённой проверке сертификата и hostname.
+
+Следующая задача блока: Task 4 — общий pipeline `raw → normalized → entity → relations`.

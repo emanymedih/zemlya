@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from landradar.source_cli import parse_args
 from landradar.sources import (
     BBox, OSMOverpassAdapter, GeofabrikIndexAdapter, RosstatOpenDataAdapter,
     parse_pbf_header,
@@ -67,6 +68,15 @@ class SourceSmokeTests(unittest.TestCase):
         self.assertEqual(rows[0]["subject_code"], "29")
         self.assertEqual(rows[0]["oktmo_code"], "29502000101")
         self.assertEqual(rows[0]["name"], "с Тестовое")
+
+    def test_rosstat_cli_defaults_to_official_kaluga_subject_code(self):
+        default_args = parse_args(["rosstat-oktmo"])
+        self.assertEqual(default_args.subject_code, "29")
+        self.assertIsNone(default_args.filter)
+
+        diagnostic_args = parse_args(["rosstat-oktmo", "--filter", "Калуж"])
+        self.assertIsNone(diagnostic_args.subject_code)
+        self.assertEqual(diagnostic_args.filter, "Калуж")
 
     def test_parse_minimal_pbf_header(self):
         header_block = (

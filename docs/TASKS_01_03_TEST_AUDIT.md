@@ -24,25 +24,27 @@ Correction:
 - Correct result: 186533 total rows, 3283 Kaluga rows.
 - Added a regression test for the schema.
 - Raw snapshots use timestamped names and are not overwritten.
+- Operational CLI drift was found on final E2E: the old default text filter still returned 15 rows.
+- CLI default now uses official `subject_code=29`; full container ingest returns 3283 rows.
 
 ## Task 3 — execution environment
 
-Result: PARTIAL / BLOCKED.
+Result: PASS / DONE.
 - Host Docker/DNS/HTTPS and disk checks pass.
-- Container Geofabrik and GitHub HTTPS pass.
-- Container Rosstat direct TLS fails certificate verification.
-- Host Schannel download plus Docker parsing works and is tested.
-- Full DONE requires direct container TLS or an explicitly accepted runtime CA policy.
+- Container Geofabrik, Rosstat and GitHub HTTPS return HTTP 200.
+- Rosstat root and intermediate CA are pinned by DER SHA-256 and verified during image build.
+- Runtime uses an app-local CA bundle; certificate and hostname verification stay enabled.
+- Preflight passed twice on the test tag and again on the canonical `task01` tag.
 
 ## Test run
 
-- Current smoke suite: 9/9 PASS.
-- Task 1 verify-current: PASS.
-- Task 2 live parser: 186533 total / 3283 subject-code-29.
-- Task 3 preflight: repeated successfully.
+- Current smoke suite: 10/10 PASS, including the CLI selection regression test.
+- Task 1 verify-current: PASS for release `8f7ab17b3321`.
+- Task 2 direct container health and full ingest: 186533 total / 3283 subject-code-29.
+- Task 3 preflight: repeated successfully with direct Rosstat TLS.
 
 ## Verdict
 
 Task 1: DONE.
-Task 2: CORRECTED and test-backed.
-Task 3: PARTIAL / BLOCKED, with a working documented fallback.
+Task 2: DONE, corrected, E2E-tested and regression-backed.
+Task 3: DONE with direct verified container TLS.
