@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-23 — Task 4 unified data pipeline
+
+Добавлены общие raw/normalized/entity/relation contracts, SQLite provenance
+catalog, детерминированные ID, идемпотентное повторное связывание и fail-safe
+current-run promotion. Добавлены `pipeline-run`, PowerShell launcher и Docker
+E2E. 14/14 тестов; live run обработал 3284 normalized records, 3290 entities,
+3288 relations. Детали и известные границы — `docs/TASK_04_EVIDENCE.md`.
+
 ## 2026-09-23 — Task 3 direct container TLS
 
 Закрыт gate execution-среды без отключения TLS verification. В Docker image

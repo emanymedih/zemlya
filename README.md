@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-Текущий smoke-suite: 10/10 PASS, включая regression-test на выбор Калужской области по официальному коду субъекта `29`. Внешний Geofabrik gate прошёл в GitHub Actions; локальный verify-current также подтверждён.
+Текущий suite: 14/14 PASS. Включает pipeline-контракты, идемпотентность каталога, проверку связей и rollback failed run. Task 4 live E2E на PC обработал 3 raw artifacts, 3284 normalized records, 3290 entities и 3288 relations. Повторный прогон сохранил размеры каталога. Подробности: `docs/TASK_04_EVIDENCE.md`.
 
 ## Live worker
 
@@ -85,3 +85,12 @@ hostname verification остаются включёнными. Полный Ross
 работает внутри контейнера и по умолчанию выбирает официальный код субъекта
 Калужской области `29`: 3283 строки из 186533. Evidence:
 `docs/TASK_03_EVIDENCE.md`.
+
+## Task 4 — общий pipeline
+
+Статус: **DONE**. Команда `pipeline-run` объединяет проверенные Geofabrik и
+Rosstat snapshots в общий SQLite-каталог: `raw → normalized → entity → relations`.
+Runs сохраняют provenance; стабильные ID обеспечивают идемпотентность, а
+неуспешный запуск не двигает указатель на последний успешный run. Реализация
+ограничена release/layers и ОКТМО; связи участков с дорогами — следующая Task 5.
+Evidence: `docs/TASK_04_EVIDENCE.md`.

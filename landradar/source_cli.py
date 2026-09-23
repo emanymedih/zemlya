@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .sources import BBox, OSMOverpassAdapter, OSMGeofabrikCatalogAdapter, GeofabrikGpkgIngestor, GeofabrikPbfIngestor, RosstatOpenDataAdapter
+from .pipeline import UnifiedPipelineRunner
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     rs_h = sub.add_parser("rosstat-health", help="Run live Rosstat passport + CSV check")
     rs_h.add_argument("--raw-dir", default="data/raw")
+
+    pipeline = sub.add_parser("pipeline-run", help="Run validated Geofabrik + Rosstat pipeline")
+    pipeline.add_argument("--geofabrik-root", default="data/osm/geofabrik-pbf")
+    pipeline.add_argument("--raw-dir", default="data/raw/pipeline/rosstat")
+    pipeline.add_argument("--database", default="data/normalized/landradar.sqlite")
+    pipeline.add_argument("--subject-code", default="29")
+    pipeline.add_argument("--report", default=None)
     return parser
 
 
@@ -128,6 +136,20 @@ def main() -> None:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if not result.get("ok"):
             raise SystemExit(2)
+    elif args.command == "pipeline-run":
+        report = UnifiedPipelineRunner(
+            geofabrik_root=args.geofabrik_root,
+            rosstat_raw_dir=args.raw_dir,
+            database_path=args.database,
+            subject_code=args.subject_code,
+        ).run()
+        if args.report:
+            report_path = Path(args.report)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = report_path.with_suffix(report_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.replace(report_path)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

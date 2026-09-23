@@ -49,4 +49,9 @@ Task 1 соответствует критериям DONE.
 Прямой TLS к Rosstat работает через закреплённый app-local CA bundle при
 включённой проверке сертификата и hostname.
 
-Следующая задача блока: Task 4 — общий pipeline `raw → normalized → entity → relations`.
+Task 4/12 — общий pipeline `raw → normalized → entity → relations`: **DONE**.
+SQLite-каталог хранит provenance и историю runs; повторный запуск идемпотентен,
+failed run не заменяет последнюю успешную сборку. Live E2E и результаты —
+`docs/TASK_04_EVIDENCE.md`.
+
+Следующая задача блока: Task 5 — `RoadFeature` и подтверждаемые пространственные связи.
