@@ -2,6 +2,7 @@ from .base import HttpResponse, HttpTransport, RequestsTransport, RawSnapshot, s
 from .osm import OSMOverpassAdapter, OSMGeofabrikCatalogAdapter, OSMGeofabrikGpkgAdapter, GeofabrikExtractLinks, OSMRoad, BBox, GEOFABRIK_CFD_PAGE
 from .osm_ingest import StreamingDownloader, GeofabrikGpkgIngestor, DownloadReceipt, GpkgValidation, GeofabrikReleaseManifest
 from .osm_pbf_ingest import GeofabrikIndexAdapter, GeofabrikPbfIngestor, GeofabrikPbfReleaseManifest, GeofabrikRegionRecord, PbfHeaderInfo, parse_pbf_header, GEOFABRIK_INDEX_URL
+from .osm_road_features import GeofabrikRoadFeatureAdapter, OSMRoadExtraction
 from .rosstat import RosstatOpenDataAdapter, RosstatDataset, OKTMO_PASSPORT_URL
 
 __all__ = [
@@ -9,5 +10,6 @@ __all__ = [
     "OSMOverpassAdapter", "OSMGeofabrikCatalogAdapter", "OSMGeofabrikGpkgAdapter", "GeofabrikExtractLinks", "OSMRoad", "BBox", "GEOFABRIK_CFD_PAGE",
     "StreamingDownloader", "GeofabrikGpkgIngestor", "DownloadReceipt", "GpkgValidation", "GeofabrikReleaseManifest",
     "GeofabrikIndexAdapter", "GeofabrikPbfIngestor", "GeofabrikPbfReleaseManifest", "GeofabrikRegionRecord", "PbfHeaderInfo", "parse_pbf_header", "GEOFABRIK_INDEX_URL",
+    "GeofabrikRoadFeatureAdapter", "OSMRoadExtraction",
     "RosstatOpenDataAdapter", "RosstatDataset", "OKTMO_PASSPORT_URL",
 ]

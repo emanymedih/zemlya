@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..sources import GeofabrikPbfIngestor, RosstatOpenDataAdapter
+from ..sources import GeofabrikPbfIngestor, GeofabrikRoadFeatureAdapter, RosstatOpenDataAdapter
 from .contracts import (
     Entity, NormalizedRecord, PipelineBundle, PipelineRun, RawArtifact, Relation, utc_now,
 )
@@ -136,6 +136,96 @@ class UnifiedPipelineRunner:
                 object_id=layer_entity.entity_id,
                 evidence_artifact_id=pbf_artifact.artifact_id,
             ))
+        road_extraction = GeofabrikRoadFeatureAdapter().extract(
+            Path(self.geofabrik_root) / "releases" / manifest.release_id / "source.osm.pbf",
+        )
+        boundary_record = NormalizedRecord.create(
+            source_key="geofabrik_pbf",
+            dataset_id=manifest.region_id,
+            schema_version="osm-admin-boundary/v1",
+            record_key=f"relation/{road_extraction.boundary_osm_id}",
+            artifact_id=pbf_artifact.artifact_id,
+            payload={
+                "osm_type": "relation",
+                "osm_id": road_extraction.boundary_osm_id,
+                "name": road_extraction.boundary_name,
+                "admin_level": "4",
+                "geometry_wkb_hex": road_extraction.boundary_geometry_wkb_hex,
+                "geometry_crs": "EPSG:4326",
+                "scope_role": "operational AOI from OSM; not legal boundary evidence",
+                "source_replication_timestamp": manifest.header.replication_timestamp_iso,
+            },
+        )
+        records.append(boundary_record)
+        boundary_entity = Entity.create(
+            entity_type="osm_admin_boundary",
+            canonical_key=f"admin_level_4:{road_extraction.boundary_osm_id}",
+            artifact_id=pbf_artifact.artifact_id,
+            record_id=boundary_record.record_id,
+            attributes={
+                "osm_id": road_extraction.boundary_osm_id,
+                "name": road_extraction.boundary_name,
+                "admin_level": "4",
+                "source_role": "operational AOI from OSM",
+            },
+        )
+        entities.append(boundary_entity)
+        for feature in road_extraction.features:
+            osm_id = str(feature["osm_id"])
+            record = NormalizedRecord.create(
+                source_key="geofabrik_pbf",
+                dataset_id=manifest.region_id,
+                schema_version="osm-road-feature/v1",
+                record_key=f"{feature['osm_type']}/{osm_id}",
+                artifact_id=pbf_artifact.artifact_id,
+                payload={
+                    **feature,
+                    "source_release_id": manifest.release_id,
+                    "source_replication_timestamp": manifest.header.replication_timestamp_iso,
+                    "feature_version_available": road_extraction.feature_version_available,
+                    "feature_timestamp_available": road_extraction.feature_timestamp_available,
+                },
+            )
+            records.append(record)
+            road_entity = Entity.create(
+                entity_type="road_feature",
+                canonical_key=f"{feature['osm_type']}:{osm_id}",
+                artifact_id=pbf_artifact.artifact_id,
+                record_id=record.record_id,
+                attributes={
+                    "osm_type": feature["osm_type"],
+                    "osm_id": int(osm_id),
+                    "highway": feature["highway"],
+                    "source_release_id": manifest.release_id,
+                },
+            )
+            entities.append(road_entity)
+            relations.append(Relation.create(
+                relation_type="intersects_osm_aoi",
+                subject_id=road_entity.entity_id,
+                object_id=boundary_entity.entity_id,
+                evidence_artifact_id=pbf_artifact.artifact_id,
+            ))
+        run.summary["geofabrik_road_features"] = {
+            "status": "complete",
+            "target_region_name": road_extraction.boundary_name,
+            "boundary_osm_id": road_extraction.boundary_osm_id,
+            "boundary_source_role": "OSM operational AOI; not legal boundary evidence",
+            "source_release_id": manifest.release_id,
+            "source_replication_timestamp": manifest.header.replication_timestamp_iso,
+            "source_artifact_sha256": pbf_artifact.sha256,
+            "candidate_count": road_extraction.candidate_count,
+            "selected_feature_count": len(road_extraction.features),
+            "rejected_outside_boundary_count": road_extraction.rejected_outside_boundary,
+            "invalid_geometry_count": 0,
+            "duplicate_osm_id_count": 0,
+            "feature_version_available": road_extraction.feature_version_available,
+            "feature_timestamp_available": road_extraction.feature_timestamp_available,
+            "feature_time_note": "GDAL OSM lines layer does not expose per-way version or timestamp",
+            "source_quality_status": "warnings" if road_extraction.source_warnings else "clean",
+            "source_quality_warning_count": len(road_extraction.source_warnings),
+            "source_quality_warning_samples": road_extraction.source_warnings[:10],
+        }
         run.source_keys.append("rosstat_opendata")
         dataset_id = "7708234640-oktmo"
         dataset, snapshots = RosstatOpenDataAdapter().fetch_oktmo(
