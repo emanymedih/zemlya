@@ -94,3 +94,13 @@ ingested. Full audit and next-work plan are in
 - Source metadata documentation:
   https://docs.osmcode.org/pyosmium/latest/user_manual/02-Extracting-Object-Data/
   and https://docs.osmcode.org/pyosmium/latest/reference/File-Processing/.
+
+- Same-input repeat on commit 9027cdc and the same current PBF completed:
+  run 652369c9-e0b2-4e8c-9e27-68bef013f661, SUCCESS,
+  2026-09-25T08:39:25Z–08:41:58Z. Catalog before/after retained 94,780
+  normalized records, 94,786 entities, 94,783 relations and 91,495 road-v2
+  records; no domain duplicates were added. Pipeline run count increased
+  from 1 to 2.
+- Raw artifacts increased from 3 to 4 because the Rosstat passport HTML
+  response had a new content hash. The PBF and Rosstat CSV hashes remained
+  identical.
