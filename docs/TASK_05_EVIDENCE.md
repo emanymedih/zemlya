@@ -62,3 +62,35 @@ Task 5 is technically complete with source warnings disclosed.
 No parcel-to-road relation was created: official parcel geometry is not yet
 ingested. Full audit and next-work plan are in
 `TASKS_01_05_AUDIT_2026-09-24.md`.
+
+## Follow-up 2026-09-25 — per-way metadata and current release
+
+- Docker unit suite after metadata/runtime changes: 28/28 PASS.
+- Added PyOsmium 4.3.1 metadata pass for selected OSM ways. Runtime image now
+  installs system libexpat1, required by the PyOsmium wheel. Schema is
+  osm-road-feature/v2 so v1 observations remain available and v2 records with
+  version/timestamp receive their own stable identities.
+- Geofabrik release: a56d6dd698ea, URL
+  https://download.geofabrik.de/russia/central-fed-district-260924.osm.pbf.
+  Bytes: 878,243,084; publisher MD5
+  c1c40923efc89bbad2865455a2726e81 verified; SHA-256
+  a56d6dd698ea6c8e3220af9793a8191d1b46ee4572042ec68076a2641a4eb3b0.
+  PBF replication timestamp: 2026-09-24T20:21:20Z.
+- Strict pipeline run, no allow-stale flag:
+  66dffa25-1f30-48d7-b9c1-d17cd388d78b, SUCCESS,
+  2026-09-25T08:26:10Z–08:28:45Z. Geofabrik freshness was current against
+  publisher MD5; replication age was 12.08 h at check.
+- Selected highway ways: 91,495; candidates 91,495; rejected outside AOI 0;
+  invalid geometries 0; duplicate IDs 0. Version coverage 91,495/91,495 and
+  timestamp coverage 91,495/91,495. Extraction duration: 140.697 seconds.
+- The SQLite catalog contains 91,495 records with schema v2. Verified stored
+  example: way 10254583, version 37, timestamp 2026-07-28T17:29:38Z, in
+  release a56d6dd698ea. This timestamp describes the OSM object version;
+  the PBF replication timestamp describes the regional snapshot.
+- Warning report groups 9 identical non-closed-ring GDAL messages as one
+  message with count 9 and retains the original events. The target AOI passed
+  geometry validation. Pipeline counts: 3 raw artifacts, 94,780 normalized
+  records, 94,786 entities, 94,783 relations.
+- Source metadata documentation:
+  https://docs.osmcode.org/pyosmium/latest/user_manual/02-Extracting-Object-Data/
+  and https://docs.osmcode.org/pyosmium/latest/reference/File-Processing/.

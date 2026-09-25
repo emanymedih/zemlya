@@ -6,6 +6,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# PyOsmium's wheel links against the system Expat runtime.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Rosstat serves only its leaf certificate. Vendor the exact chain trusted by
 # the Windows host, pin the exported DER files, and build an app-local bundle.
 COPY deploy/geofabrik-worker/certs/*.cer /tmp/zemlya-certs/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -175,7 +176,7 @@ class UnifiedPipelineRunner:
             record = NormalizedRecord.create(
                 source_key="geofabrik_pbf",
                 dataset_id=manifest.region_id,
-                schema_version="osm-road-feature/v1",
+                schema_version="osm-road-feature/v2",
                 record_key=f"{feature['osm_type']}/{osm_id}",
                 artifact_id=pbf_artifact.artifact_id,
                 payload={
@@ -206,6 +207,7 @@ class UnifiedPipelineRunner:
                 object_id=boundary_entity.entity_id,
                 evidence_artifact_id=pbf_artifact.artifact_id,
             ))
+        warning_counts = Counter(road_extraction.source_warnings)
         run.summary["geofabrik_road_features"] = {
             "status": "complete",
             "target_region_name": road_extraction.boundary_name,
@@ -221,9 +223,21 @@ class UnifiedPipelineRunner:
             "duplicate_osm_id_count": 0,
             "feature_version_available": road_extraction.feature_version_available,
             "feature_timestamp_available": road_extraction.feature_timestamp_available,
-            "feature_time_note": "GDAL OSM lines layer does not expose per-way version or timestamp",
+            "feature_versions_available_count": road_extraction.feature_versions_available_count,
+            "feature_timestamps_available_count": road_extraction.feature_timestamps_available_count,
+            "feature_time_note": (
+                "OSM way edit timestamps come from PBF object metadata in UTC; "
+                "source replication timestamp remains the regional snapshot time"
+                if road_extraction.feature_timestamp_available else
+                "Per-way metadata coverage is incomplete; use the PBF replication timestamp"
+            ),
+            "extraction_duration_seconds": road_extraction.extraction_duration_seconds,
             "source_quality_status": "warnings" if road_extraction.source_warnings else "clean",
             "source_quality_warning_count": len(road_extraction.source_warnings),
+            "source_quality_warning_counts": [
+                {"message": message, "count": count}
+                for message, count in warning_counts.most_common()
+            ],
             "source_quality_warning_samples": road_extraction.source_warnings[:10],
         }
         run.source_keys.append("rosstat_opendata")

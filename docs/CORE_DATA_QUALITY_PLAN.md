@@ -29,12 +29,14 @@
 
 ## План оставшихся задач качества
 
-### Task 5 — OSM road features (DONE_WITH_WARNINGS, 2026-09-24)
+### Task 5 — OSM road features (DONE_WITH_WARNINGS, 2026-09-25)
 
-- Выполнено: 91,455 проверенных highway ways из свежего PBF, CRS/геометрии/IDs
-  проверены; 9 GDAL warnings сохранены. Подробности: TASK_05_EVIDENCE.md.
-- Извлекать только подтверждённые source features из Geofabrik layers.
-- Сохранять OSM type/id/version, source timestamp, tags, geometry и snapshot.
+- Выполнено: 91,455 highway ways; CRS/геометрия/IDs проверены, 9 GDAL warnings
+  сохранены. PyOsmium pass извлёк version и timestamp всех 91,455 ways за
+  131.948 секунды; schema v2 хранит новую форму записи без перезаписи v1.
+- Warning report группирует одинаковые сообщения и сохраняет исходные события.
+- Источник snapshot и время правки отдельного OSM way записываются раздельно.
+- Подробные live-run evidence: TASK_05_EVIDENCE.md.
 - Проверять валидность геометрии, CRS, пустые/неожиданные типы и counts
   по слоям; сравнивать ограниченную выборку с GDAL read.
 - Утверждения о юридическом доступе к участку не выводить из OSM-тегов.

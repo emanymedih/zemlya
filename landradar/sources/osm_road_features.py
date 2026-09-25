@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 import warnings
 
@@ -20,12 +22,41 @@ class OSMRoadExtraction:
     source_warnings: list[str]
     feature_version_available: bool
     feature_timestamp_available: bool
+    feature_versions_available_count: int
+    feature_timestamps_available_count: int
+    extraction_duration_seconds: float
 
 
 class GeofabrikRoadFeatureAdapter:
     """Read highway ways inside the OSM-mapped target-region boundary."""
 
     source_key = "geofabrik_osm_road_features"
+
+    @staticmethod
+    def _read_way_metadata(pbf_path: str, way_ids: set[int]) -> dict[int, dict[str, Any]]:
+        if not way_ids:
+            return {}
+        import osmium
+
+        processor = osmium.FileProcessor(pbf_path, osmium.osm.WAY).with_filter(
+            osmium.filter.IdFilter(way_ids)
+        )
+        metadata: dict[int, dict[str, Any]] = {}
+        for way in processor:
+            way_id = int(way.id)
+            if way_id in metadata:
+                raise ValueError(f"Duplicate OSM way metadata in PBF: {way_id}")
+            timestamp = way.timestamp
+            if timestamp is not None:
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                timestamp = timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            version = int(way.version) if way.version else None
+            metadata[way_id] = {"osm_version": version, "osm_timestamp": timestamp}
+        missing = sorted(way_ids - metadata.keys())
+        if missing:
+            raise ValueError(f"PBF metadata missing for selected OSM ways: {missing[:10]}")
+        return metadata
 
     @staticmethod
     def _columns_as_lists(fields: list[str], arrays: list[Any]) -> dict[str, list[Any]]:
@@ -38,6 +69,7 @@ class GeofabrikRoadFeatureAdapter:
 
     def extract(self, pbf_path: str | Path, *,
                 region_name: str = TARGET_REGION_NAME) -> OSMRoadExtraction:
+        started = perf_counter()
         import pyogrio
         from shapely import from_wkb
 
@@ -148,6 +180,13 @@ class GeofabrikRoadFeatureAdapter:
                     "predicate": "geometry_intersects",
                 },
             })
+        way_metadata = self._read_way_metadata(
+            pbf_path, {int(feature["osm_id"]) for feature in features}
+        )
+        for feature in features:
+            feature.update(way_metadata[int(feature["osm_id"])])
+        version_count = sum(feature["osm_version"] is not None for feature in features)
+        timestamp_count = sum(feature["osm_timestamp"] is not None for feature in features)
         return OSMRoadExtraction(
             boundary_osm_id=boundary_osm_id,
             boundary_name=region_name,
@@ -156,6 +195,9 @@ class GeofabrikRoadFeatureAdapter:
             candidate_count=candidate_count,
             rejected_outside_boundary=rejected_outside,
             source_warnings=source_warnings,
-            feature_version_available="osm_version" in available_fields,
-            feature_timestamp_available="osm_timestamp" in available_fields,
+            feature_version_available=bool(features) and version_count == len(features),
+            feature_timestamp_available=bool(features) and timestamp_count == len(features),
+            feature_versions_available_count=version_count,
+            feature_timestamps_available_count=timestamp_count,
+            extraction_duration_seconds=round(perf_counter() - started, 3),
         )
