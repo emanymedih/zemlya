@@ -116,6 +116,23 @@ class SourceSmokeTests(unittest.TestCase):
         self.assertEqual(rows[0]["introduction_date"], "01.01.2026")
         self.assertNotIn("_source_quality_issues", rows[0])
 
+    def test_rosstat_unknown_structure_stops_before_data_download(self):
+        from landradar.sources.base import HttpResponse
+
+        class ChangedStructureTransport:
+            calls = 0
+
+            def get(self, url, **kwargs):
+                self.calls += 1
+                return HttpResponse(200, url, {"content-type": "text/html"},
+                                    b'<a href="data-20260901T1609-structure-20990101T0000.csv">CSV</a>')
+
+        transport = ChangedStructureTransport()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "Unknown Rosstat OKTMO structure"):
+                RosstatOpenDataAdapter(transport=transport).fetch_oktmo(raw_dir=directory)
+        self.assertEqual(transport.calls, 1)
+
     def test_rosstat_fetch_reports_raw_snapshots_before_parse_failure(self):
         from landradar.sources.base import HttpResponse
 

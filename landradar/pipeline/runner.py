@@ -15,6 +15,7 @@ from .contracts import (
     Entity, NormalizedRecord, PipelineBundle, PipelineRun, RawArtifact, Relation, utc_now,
 )
 from .store import PipelineStore
+from .oktmo_hierarchy import build_hierarchy, entry_key
 
 
 def assess_geofabrik_freshness(
@@ -306,9 +307,13 @@ class UnifiedPipelineRunner:
         }
         run.source_keys.append("rosstat_opendata")
         dataset_id = "7708234640-oktmo"
+        rosstat_started = perf_counter()
         dataset, snapshots = RosstatOpenDataAdapter().fetch_oktmo(
             raw_dir=str(self.rosstat_raw_dir),
             on_snapshot=lambda snapshot: self._capture_rosstat_snapshot(snapshot, dataset_id),
+        )
+        run.summary["rosstat_fetch_parse_duration_seconds"] = round(
+            perf_counter() - rosstat_started, 3
         )
         snapshot_artifacts: dict[str, RawArtifact] = {}
         for snapshot in snapshots:
@@ -331,6 +336,10 @@ class UnifiedPipelineRunner:
         ]
         if not selected:
             raise ValueError(f"Rosstat dataset has no rows for subject code {self.subject_code}")
+        hierarchy = build_hierarchy(selected, self.subject_code)
+        run.summary["rosstat_hierarchy"] = hierarchy.summary
+        if hierarchy.summary["status"] != "complete":
+            raise ValueError(f"Rosstat OKTMO hierarchy invalid: {hierarchy.summary}")
         dataset_issues = [row for row in dataset.rows if row.get("_source_quality_issues")]
         publication_date_age_days = None
         if dataset.published_version:
@@ -347,15 +356,13 @@ class UnifiedPipelineRunner:
             attributes={"subject_code": self.subject_code},
         )
         entities.append(subject)
+        entry_entities: dict[str, Entity] = {}
         for row in selected:
-            code = row["oktmo_code"]
-            record_key = ":".join((
-                code, row["section"], row["acceptance_date"], row["introduction_date"],
-            ))
+            record_key = entry_key(row)
             record = NormalizedRecord.create(
                 source_key="rosstat_opendata",
                 dataset_id=dataset.dataset_id,
-                schema_version="rosstat-oktmo-13col/v2",
+                schema_version="rosstat-oktmo-13col/v3",
                 record_key=record_key,
                 artifact_id=csv_artifact.artifact_id,
                 payload=row,
@@ -369,9 +376,17 @@ class UnifiedPipelineRunner:
                 attributes=row,
             )
             entities.append(entity)
+            entry_entities[record_key] = entity
             relations.append(Relation.create(
                 relation_type="within_subject", subject_id=entity.entity_id,
                 object_id=subject.entity_id,
+                evidence_artifact_id=csv_artifact.artifact_id,
+            ))
+        for child_key, parent_key in hierarchy.edges:
+            relations.append(Relation.create(
+                relation_type="oktmo_parent_code",
+                subject_id=entry_entities[child_key].entity_id,
+                object_id=entry_entities[parent_key].entity_id,
                 evidence_artifact_id=csv_artifact.artifact_id,
             ))
         run.summary.update({

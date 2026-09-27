@@ -129,6 +129,7 @@ class RosstatOpenDataAdapter:
                         f"Rosstat OKTMO row {row_number}: invalid {field}={item[field]!r}"
                     ) from exc
             item["oktmo_code"] = "".join(item[key] for key in fields[:4])
+            item["_source_row_number"] = str(row_number)
             result.append(item)
         return result
 

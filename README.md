@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-На 2026-09-27 Docker suite: 39/39 PASS. Он проверяет pipeline-контракты, кэш дорожного слоя, идемпотентность, миграцию SQLite-каталога, валидацию источников и rollback. Актуальные на момент проверки результаты и ограничения изложены в `docs/TASK_05_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`. Локальный PBF от 2026-09-24 уже отстаёт от publisher sidecar; строгий запуск требует обновить его.
+На 2026-09-27 Docker suite: 45/45 PASS. Он проверяет pipeline, кэш дорог, иерархию ОКТМО, миграцию SQLite и rollback. Свежий выпуск Geofabrik `29d06dc7ff03` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`.
 
 ## Live worker
 
@@ -99,3 +99,13 @@ Evidence: `docs/TASK_04_EVIDENCE.md`.
 ## Task 5 — дорожный слой OSM
 
 Статус: **DONE_WITH_WARNINGS**. Из проверенного Geofabrik PBF извлекаются дороги Калужской области с геометрией, тегами, OSM version/timestamp и provenance. Кэш привязан к исходному SHA-256 и версии адаптера; временные файлы PBF/GDAL можно разместить в Docker volume `/fast`. Результат не подтверждает юридический подъезд к конкретному участку. Для ускорения SQLite доступен режим `./scripts/run-task04.ps1 -UseDockerCatalog`: перед первым использованием он проверяет исходную базу и копирует её в отдельный volume, оставляя исходный файл на месте. На проверенном ПК исполнение .ps1 пока блокирует Windows Restricted execution policy; Docker-компоненты режима испытаны отдельно. Подробности: `docs/TASK_05_EVIDENCE.md`.
+
+
+## Task 6 — иерархия кодов ОКТМО
+
+Статус: **DONE**. Из официальных полей `TER/KOD1/KOD2/KOD3` построены
+3 281 связь родительского кода для 3 283 строк Калужской области.
+Каждая связь подтверждена CSV snapshot; проверки дублей, отсутствующих
+родителей и циклов прошли без исключений. Это иерархия кодов, не границы
+земельных участков. Подробности: `docs/TASK_06_PLAN.md` и
+`docs/TASK_06_EVIDENCE.md`.
