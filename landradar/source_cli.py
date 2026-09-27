@@ -8,6 +8,7 @@ import tempfile
 
 from .sources import BBox, OSMOverpassAdapter, OSMGeofabrikCatalogAdapter, GeofabrikGpkgIngestor, GeofabrikPbfIngestor, RosstatOpenDataAdapter
 from .pipeline import UnifiedPipelineRunner
+from .sources.rosstat import OKTMO_STRUCTURE_URL
 
 
 def write_json_atomic(path: str | Path, payload: dict) -> None:
@@ -146,14 +147,6 @@ def main() -> None:
             selection = {"text_filter": args.filter}
         if not rows:
             raise SystemExit(f"No Rosstat OKTMO rows matched {selection}")
-        invalid_rows = [row for row in rows if row.get("_source_quality_issues")]
-        if invalid_rows:
-            first = invalid_rows[0]
-            raise SystemExit(
-                "Selected Rosstat rows contain invalid validity interval: "
-                f"row={first['_source_row_number']} code={first['oktmo_code']} "
-                f"valid_from={first['valid_from']} valid_to={first['valid_to']}"
-            )
         quality_issues = [
             row for row in dataset.rows if row.get("_source_quality_issues")
         ]
@@ -163,6 +156,7 @@ def main() -> None:
             "passport_url": dataset.passport_url,
             "data_url": dataset.data_url,
             "published_version": dataset.published_version,
+            "structure_url": OKTMO_STRUCTURE_URL,
             "latest_advertised_file": True,
             "source_quality_issue_count": len(quality_issues),
             "source_quality_issue_samples": [
@@ -170,8 +164,8 @@ def main() -> None:
                     "source_row": row["_source_row_number"],
                     "oktmo_code": row["oktmo_code"],
                     "issue": row["_source_quality_issues"][0],
-                    "valid_from": row["valid_from"],
-                    "valid_to": row["valid_to"],
+                    "acceptance_date": row["acceptance_date"],
+                    "introduction_date": row["introduction_date"],
                 }
                 for row in quality_issues[:20]
             ],

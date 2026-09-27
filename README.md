@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-Текущий suite: 22/22 PASS в Docker. Включает pipeline-контракты, идемпотентность каталога, свежесть источников, schema validation и rollback failed run. Последний live E2E обработал 3 raw artifacts, 3284 normalized records, 3290 entities и 3288 relations. Geofabrik MD5 совпал с publisher latest; Rosstat report показывает file version/возраст и две некорректные записи вне субъекта 29. Подробности: `docs/TASK_04_EVIDENCE.md`; план качества: `docs/CORE_DATA_QUALITY_PLAN.md`.
+На 2026-09-27 Docker suite: 39/39 PASS. Он проверяет pipeline-контракты, кэш дорожного слоя, идемпотентность, миграцию SQLite-каталога, валидацию источников и rollback. Актуальные на момент проверки результаты и ограничения изложены в `docs/TASK_05_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`. Локальный PBF от 2026-09-24 уже отстаёт от publisher sidecar; строгий запуск требует обновить его.
 
 ## Live worker
 
@@ -91,6 +91,11 @@ hostname verification остаются включёнными. Полный Ross
 Статус: **DONE**. Команда `pipeline-run` объединяет проверенные Geofabrik и
 Rosstat snapshots в общий SQLite-каталог: `raw → normalized → entity → relations`.
 Runs сохраняют provenance; стабильные ID обеспечивают идемпотентность, а
-неуспешный запуск не двигает указатель на последний успешный run. Реализация
-ограничена release/layers и ОКТМО; связи участков с дорогами — следующая Task 5.
+неуспешный запуск не двигает указатель на последний успешный run. На этапе
+Task 4 слой ограничивался release/layers и ОКТМО; дороги добавлены в Task 5,
+а связь с участком требует официальной геометрии Parcel (Task 13).
 Evidence: `docs/TASK_04_EVIDENCE.md`.
+
+## Task 5 — дорожный слой OSM
+
+Статус: **DONE_WITH_WARNINGS**. Из проверенного Geofabrik PBF извлекаются дороги Калужской области с геометрией, тегами, OSM version/timestamp и provenance. Кэш привязан к исходному SHA-256 и версии адаптера; временные файлы PBF/GDAL можно разместить в Docker volume `/fast`. Результат не подтверждает юридический подъезд к конкретному участку. Для ускорения SQLite доступен режим `./scripts/run-task04.ps1 -UseDockerCatalog`: перед первым использованием он проверяет исходную базу и копирует её в отдельный volume, оставляя исходный файл на месте. На проверенном ПК исполнение .ps1 пока блокирует Windows Restricted execution policy; Docker-компоненты режима испытаны отдельно. Подробности: `docs/TASK_05_EVIDENCE.md`.

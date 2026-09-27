@@ -5,6 +5,14 @@ services:
       dockerfile: deploy/geofabrik-worker/Dockerfile
     environment:
       LANDRADAR_GEOFABRIK_ROOT: /data/geofabrik-pbf
+      LANDRADAR_PBF_WORK_DIR: /fast
+      TMPDIR: /fast
+      CPL_TMPDIR: /fast
     volumes:
-      - ./data:/data
+      - ../../geofabrik-worker-data:/data
+      - landradar-pbf-work:/fast
     restart: "no"
+
+volumes:
+  landradar-pbf-work:
+    name: landradar-pbf-work

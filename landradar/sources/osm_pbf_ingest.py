@@ -345,11 +345,16 @@ class GeofabrikPbfIngestor:
             raise FileNotFoundError(f"current.json points to missing manifest: {manifest_path}")
         return self._from_raw(json.loads(manifest_path.read_text(encoding="utf-8")))
 
-    def verify_current(self) -> dict[str, Any]:
+    def verify_current(
+        self, *, pbf_path_override: str | Path | None = None,
+    ) -> dict[str, Any]:
         current = self.current_manifest()
         if current is None:
             return {"ok": False, "error_type": "FileNotFoundError", "error": "No current Geofabrik PBF release"}
-        pbf_path = self.releases_dir / current.release_id / "source.osm.pbf"
+        pbf_path = (
+            Path(pbf_path_override) if pbf_path_override is not None else
+            self.releases_dir / current.release_id / "source.osm.pbf"
+        )
         try:
             if not pbf_path.exists():
                 raise FileNotFoundError(str(pbf_path))

@@ -85,6 +85,11 @@ class SourceSmokeTests(unittest.TestCase):
         self.assertEqual(rows[0]["subject_code"], "29")
         self.assertEqual(rows[0]["oktmo_code"], "29502000101")
         self.assertEqual(rows[0]["name"], "с Тестовое")
+        self.assertEqual(rows[0]["section"], "2")
+        self.assertEqual(rows[0]["change_number"], "814")
+        self.assertEqual(rows[0]["change_type"], "3")
+        self.assertEqual(rows[0]["acceptance_date"], "16.05.2025")
+        self.assertEqual(rows[0]["introduction_date"], "01.01.2026")
 
     def test_rosstat_parser_validates_every_row(self):
         valid = (
@@ -95,20 +100,21 @@ class SourceSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "row 2: invalid subject_code"):
             RosstatOpenDataAdapter.parse_csv(invalid_later_row.encode("cp1251"))
 
-    def test_rosstat_parser_rejects_calendar_but_marks_interval_anomaly(self):
+    def test_rosstat_parser_validates_dates_without_inventing_validity_interval(self):
         valid = (
             '"29";"502";"000";"101";"0";"2";"с Тестовое";;;"814";"3";'
             "16.05.2025;01.01.2026\n"
         )
         invalid_calendar_date = valid.replace("16.05.2025", "31.02.2025")
-        with self.assertRaisesRegex(ValueError, "invalid valid_from"):
+        with self.assertRaisesRegex(ValueError, "invalid acceptance_date"):
             RosstatOpenDataAdapter.parse_csv(invalid_calendar_date.encode("cp1251"))
-        reversed_interval = valid.replace(
+        later_acceptance = valid.replace(
             "16.05.2025;01.01.2026", "02.01.2026;01.01.2026"
         )
-        rows = RosstatOpenDataAdapter.parse_csv(reversed_interval.encode("cp1251"))
-        self.assertEqual(rows[0]["_source_quality_issues"], ["valid_from_after_valid_to"])
-        self.assertEqual(rows[0]["_source_row_number"], "1")
+        rows = RosstatOpenDataAdapter.parse_csv(later_acceptance.encode("cp1251"))
+        self.assertEqual(rows[0]["acceptance_date"], "02.01.2026")
+        self.assertEqual(rows[0]["introduction_date"], "01.01.2026")
+        self.assertNotIn("_source_quality_issues", rows[0])
 
     def test_rosstat_fetch_reports_raw_snapshots_before_parse_failure(self):
         from landradar.sources.base import HttpResponse

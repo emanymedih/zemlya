@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -6,8 +7,11 @@ from pathlib import Path
 from landradar.pipeline.contracts import (
     Entity, NormalizedRecord, PipelineBundle, PipelineRun, RawArtifact, Relation,
 )
+from landradar.pipeline.catalog_migrate import seed_catalog
 from landradar.pipeline.store import PipelineStore
-from landradar.pipeline.runner import assess_geofabrik_freshness
+from landradar.pipeline.runner import (
+    UnifiedPipelineRunner, assess_geofabrik_freshness,
+)
 
 
 def make_bundle(run_id: str) -> PipelineBundle:
@@ -44,6 +48,53 @@ def make_bundle(run_id: str) -> PipelineBundle:
 
 
 class PipelineStoreTests(unittest.TestCase):
+    def test_catalog_seed_preserves_source_and_refuses_to_replace_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "host.sqlite"
+            target = Path(directory) / "volume" / "catalog.sqlite"
+            store = PipelineStore(source)
+            store.commit_bundle(make_bundle("run-1"))
+            store.close()
+            first = seed_catalog(source, target)
+            self.assertEqual(first["status"], "seeded")
+            self.assertEqual(first["current_run_id"], "run-1")
+            self.assertTrue(source.exists())
+            self.assertEqual(seed_catalog(source, target)["status"], "existing")
+            with sqlite3.connect(target) as copied:
+                self.assertEqual(copied.execute("SELECT COUNT(*) FROM entities").fetchone()[0], 2)
+
+    def test_corrupt_catalog_is_not_seeded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "corrupt.sqlite"
+            target = Path(directory) / "volume" / "catalog.sqlite"
+            source.write_bytes(b"not a SQLite database")
+            with self.assertRaises(sqlite3.DatabaseError):
+                seed_catalog(source, target)
+            self.assertFalse(target.exists())
+
+    def test_export_preserves_previous_backup_if_source_is_corrupt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "volume.sqlite"
+            backup = Path(directory) / "host" / "latest.sqlite"
+            store = PipelineStore(source)
+            store.commit_bundle(make_bundle("run-1"))
+            store.close()
+            result = seed_catalog(source, backup, replace_existing=True)
+            self.assertEqual(result["status"], "backed_up")
+            store = PipelineStore(source)
+            store.commit_bundle(make_bundle("run-2"))
+            store.close()
+            updated = seed_catalog(source, backup, replace_existing=True)
+            self.assertEqual(updated["current_run_id"], "run-2")
+            source.write_bytes(b"not a SQLite database")
+            with self.assertRaises(sqlite3.DatabaseError):
+                seed_catalog(source, backup, replace_existing=True)
+            with sqlite3.connect(backup) as valid:
+                pointer = valid.execute(
+                    "SELECT current_run_id FROM pipeline_state WHERE singleton = 1"
+                ).fetchone()[0]
+            self.assertEqual(pointer, "run-2")
+
     def test_stable_ids_and_repeat_run_do_not_duplicate_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
             store = PipelineStore(Path(directory) / "pipeline.sqlite")
@@ -104,6 +155,26 @@ class PipelineStoreTests(unittest.TestCase):
         self.assertEqual(current["status"], "current")
         self.assertGreaterEqual(current["replication_age_hours"], 0)
         self.assertEqual(changed["status"], "upstream_changed")
+
+    def test_runner_stages_pbf_for_container_local_processing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.osm.pbf"
+            source.write_bytes(b"pbf fixture")
+            runner = UnifiedPipelineRunner(
+                geofabrik_root=directory,
+                rosstat_raw_dir=directory,
+                database_path=Path(directory) / "catalog.sqlite",
+            )
+            work_root = Path(directory) / "dedicated-work-volume"
+            with patch.dict("os.environ", {"LANDRADAR_PBF_WORK_DIR": str(work_root)}):
+                staged = runner._prepare_pbf_for_run(source)
+                try:
+                    self.assertEqual(runner._pbf_stage_status, "staged")
+                    self.assertNotEqual(staged, source)
+                    self.assertEqual(staged.read_bytes(), source.read_bytes())
+                    self.assertEqual(staged.parent.parent, work_root)
+                finally:
+                    runner._pbf_stage_tempdir.cleanup()
 
     def test_pipeline_run_uses_build_commit_version(self):
         with patch.dict("os.environ", {"LANDRADAR_CODE_VERSION": "git:abc123"}):

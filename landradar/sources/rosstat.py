@@ -12,6 +12,8 @@ import re
 from .base import HttpTransport, RequestsTransport, RawSnapshot, save_raw_snapshot
 
 OKTMO_PASSPORT_URL = "https://rosstat.gov.ru/opendata/7708234640-oktmo"
+OKTMO_STRUCTURE_VERSION = "20260210T1102"
+OKTMO_STRUCTURE_URL = f"{OKTMO_PASSPORT_URL}/structure-{OKTMO_STRUCTURE_VERSION}.csv"
 ROSTAT_OPENDATA_TERMS_URL = "https://rosstat.gov.ru/opendata"
 ROSTAT_OPENDATA_USE_TERMS = (
     "Rosstat standard open-data terms: free reuse, including modification and "
@@ -92,9 +94,9 @@ class RosstatOpenDataAdapter:
 
         fields = [
             "subject_code", "municipality_code", "territory_code",
-            "locality_code", "control_digit", "record_type",
-            "name", "parent_name", "additional_name",
-            "legacy_code", "legacy_control_digit", "valid_from", "valid_to",
+            "locality_code", "control_digit", "section",
+            "name", "additional_info", "description",
+            "change_number", "change_type", "acceptance_date", "introduction_date",
         ]
         result: list[dict[str, str]] = []
         widths = (2, 3, 3, 3)
@@ -111,21 +113,21 @@ class RosstatOpenDataAdapter:
                     )
             if re.fullmatch(r"\d", item["control_digit"]) is None:
                 raise ValueError(f"Rosstat OKTMO row {row_number}: invalid control digit")
-            if re.fullmatch(r"\d", item["record_type"]) is None:
-                raise ValueError(f"Rosstat OKTMO row {row_number}: invalid record type")
+            if re.fullmatch(r"[12]", item["section"]) is None:
+                raise ValueError(f"Rosstat OKTMO row {row_number}: invalid section")
+            if re.fullmatch(r"\d{3}", item["change_number"]) is None:
+                raise ValueError(f"Rosstat OKTMO row {row_number}: invalid change number")
+            if re.fullmatch(r"\d", item["change_type"]) is None:
+                raise ValueError(f"Rosstat OKTMO row {row_number}: invalid change type")
             if not item["name"]:
                 raise ValueError(f"Rosstat OKTMO row {row_number}: empty name")
-            parsed_dates = []
-            for field in ("valid_from", "valid_to"):
+            for field in ("acceptance_date", "introduction_date"):
                 try:
-                    parsed_dates.append(datetime.strptime(item[field], "%d.%m.%Y").date())
+                    datetime.strptime(item[field], "%d.%m.%Y")
                 except ValueError as exc:
                     raise ValueError(
                         f"Rosstat OKTMO row {row_number}: invalid {field}={item[field]!r}"
                     ) from exc
-            if parsed_dates[0] > parsed_dates[1]:
-                item["_source_row_number"] = str(row_number)
-                item["_source_quality_issues"] = ["valid_from_after_valid_to"]
             item["oktmo_code"] = "".join(item[key] for key in fields[:4])
             result.append(item)
         return result
@@ -144,6 +146,8 @@ class RosstatOpenDataAdapter:
         if on_snapshot:
             on_snapshot(p_snapshot)
         data_url = self.resolve_latest_data_url(passport.text, passport.url)
+        if dataset_id == "7708234640-oktmo" and f"structure-{OKTMO_STRUCTURE_VERSION}" not in data_url:
+            raise ValueError(f"Unknown Rosstat OKTMO structure in {data_url}")
         data = self.transport.get(data_url, headers={"Accept": "text/csv,*/*"}, timeout=timeout)
         if data.status_code != 200:
             raise RuntimeError(f"Rosstat data HTTP {data.status_code}: {data.text[:300]}")
@@ -198,6 +202,7 @@ class RosstatOpenDataAdapter:
                 "records": len(dataset.rows),
                 "kaluga_subject_records": len(kaluga_rows),
                 "published_version": dataset.published_version,
+                "structure_url": OKTMO_STRUCTURE_URL,
                 "latest_advertised_file": True,
                 "quality_status": "warnings" if quality_issues else "clean",
                 "source_quality_issue_count": len(quality_issues),
@@ -206,8 +211,8 @@ class RosstatOpenDataAdapter:
                     {
                         "source_row": row["_source_row_number"],
                         "oktmo_code": row["oktmo_code"],
-                        "valid_from": row["valid_from"],
-                        "valid_to": row["valid_to"],
+                        "acceptance_date": row["acceptance_date"],
+                        "introduction_date": row["introduction_date"],
                     }
                     for row in quality_issues[:20]
                 ],

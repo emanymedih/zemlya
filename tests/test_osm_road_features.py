@@ -1,5 +1,8 @@
+import hashlib
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -7,7 +10,9 @@ import numpy as np
 from shapely import to_wkb
 from shapely.geometry import LineString, box
 
-from landradar.sources.osm_road_features import GeofabrikRoadFeatureAdapter
+from landradar.sources.osm_road_features import (
+    GeofabrikRoadFeatureAdapter, OSMRoadExtraction,
+)
 
 
 class RoadFeatureAdapterTests(unittest.TestCase):
@@ -153,6 +158,156 @@ class RoadFeatureAdapterTests(unittest.TestCase):
         self.assertTrue(result.feature_version_available)
         self.assertFalse(result.feature_timestamp_available)
         self.assertIsNone(result.features[0]["osm_timestamp"])
+
+
+    @staticmethod
+    def _sample_extraction():
+        return OSMRoadExtraction(
+            boundary_osm_id="900",
+            boundary_name="Калужская область",
+            boundary_geometry_wkb_hex="00",
+            features=[{
+                "osm_type": "way", "osm_id": 100, "highway": "residential",
+                "osm_version": 7, "osm_timestamp": "2026-09-23T20:00:00Z",
+            }],
+            candidate_count=1,
+            rejected_outside_boundary=0,
+            source_warnings=[],
+            feature_version_available=True,
+            feature_timestamp_available=True,
+            feature_versions_available_count=1,
+            feature_timestamps_available_count=1,
+            extraction_duration_seconds=2.5,
+        )
+
+    def test_cached_extraction_is_reused_for_same_pbf_hash(self):
+        adapter = GeofabrikRoadFeatureAdapter()
+        with TemporaryDirectory() as cache_dir:
+            with patch.object(adapter, "extract", return_value=self._sample_extraction()) as scan:
+                first = adapter.extract_cached(
+                    "fixture.osm.pbf", cache_dir=cache_dir, source_sha256="a" * 64,
+                    stage_source=False,
+                )
+                second = adapter.extract_cached(
+                    "fixture.osm.pbf", cache_dir=cache_dir, source_sha256="a" * 64,
+                    stage_source=False,
+                )
+        self.assertEqual(first.cache_status, "miss")
+        self.assertEqual(second.cache_status, "hit")
+        self.assertEqual(second.features, first.features)
+        self.assertEqual(second.extraction_duration_seconds, 0.0)
+        self.assertEqual(scan.call_count, 1)
+
+    def test_cache_hit_rejects_changed_unverified_source(self):
+        adapter = GeofabrikRoadFeatureAdapter()
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "source.osm.pbf"
+            source.write_bytes(b"first version")
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            with patch.object(adapter, "extract", return_value=self._sample_extraction()) as scan:
+                adapter.extract_cached(source, cache_dir=directory, source_sha256=digest)
+                source.write_bytes(b"changed version")
+                with self.assertRaisesRegex(ValueError, "SHA-256 differs from the cache key"):
+                    adapter.extract_cached(source, cache_dir=directory, source_sha256=digest)
+            self.assertEqual(scan.call_count, 1)
+
+    def test_cache_is_invalidated_when_extractor_changes(self):
+        adapter = GeofabrikRoadFeatureAdapter()
+        with TemporaryDirectory() as cache_dir:
+            with patch.object(adapter, "extract", return_value=self._sample_extraction()) as scan:
+                with patch.object(GeofabrikRoadFeatureAdapter, "_extractor_fingerprint", return_value="a" * 64):
+                    first = adapter.extract_cached(
+                        "fixture.osm.pbf", cache_dir=cache_dir, source_sha256="b" * 64,
+                        stage_source=False,
+                    )
+                with patch.object(GeofabrikRoadFeatureAdapter, "_extractor_fingerprint", return_value="c" * 64):
+                    changed = adapter.extract_cached(
+                        "fixture.osm.pbf", cache_dir=cache_dir, source_sha256="b" * 64,
+                        stage_source=False,
+                    )
+        self.assertEqual(first.cache_status, "miss")
+        self.assertEqual(changed.cache_status, "miss")
+        self.assertEqual(scan.call_count, 2)
+
+    def test_pbf_is_staged_and_checksum_verified_before_extraction(self):
+        adapter = GeofabrikRoadFeatureAdapter()
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.osm.pbf"
+            source.write_bytes(b"verified pbf fixture")
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            seen_paths = []
+
+            def inspect_staged(path, *, region_name):
+                staged = Path(path)
+                self.assertEqual(staged.read_bytes(), source.read_bytes())
+                seen_paths.append(staged)
+                return self._sample_extraction()
+
+            work_root = Path(temp_dir) / "dedicated-work-volume"
+            with (
+                patch.dict("os.environ", {"LANDRADAR_PBF_WORK_DIR": str(work_root)}),
+                patch.object(adapter, "extract", side_effect=inspect_staged),
+            ):
+                _, duration, status, error = adapter._extract_staged(
+                    source, digest, "Калужская область",
+                )
+        self.assertEqual(seen_paths[0].parent.parent, work_root)
+        self.assertGreaterEqual(duration, 0.0)
+        self.assertEqual(status, "staged")
+        self.assertIsNone(error)
+        self.assertNotEqual(seen_paths[0], source)
+        self.assertFalse(seen_paths[0].exists())
+
+    def test_staging_rejects_checksum_mismatch(self):
+        adapter = GeofabrikRoadFeatureAdapter()
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.osm.pbf"
+            source.write_bytes(b"verified pbf fixture")
+            with self.assertRaisesRegex(ValueError, "SHA-256 differs"):
+                adapter._extract_staged(
+                    source, "0" * 64, "Калужская область",
+                )
+
+    def test_direct_fallback_still_checks_source_hash(self):
+        adapter = GeofabrikRoadFeatureAdapter()
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.osm.pbf"
+            source.write_bytes(b"verified pbf fixture")
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            with (
+                patch("landradar.sources.osm_road_features.shutil.disk_usage", return_value=SimpleNamespace(free=0)),
+                patch.object(adapter, "extract", return_value=self._sample_extraction()) as scan,
+            ):
+                _, _, status, error = adapter._extract_staged(
+                    source, digest, "Калужская область",
+                )
+                with self.assertRaisesRegex(ValueError, "Direct Geofabrik PBF SHA-256"):
+                    adapter._extract_staged(source, "0" * 64, "Калужская область")
+            self.assertEqual(status, "fallback_direct")
+            self.assertIsNotNone(error)
+            self.assertEqual(scan.call_count, 1)
+
+    def test_corrupt_cache_is_rebuilt_from_pbf(self):
+        adapter = GeofabrikRoadFeatureAdapter()
+        digest = "b" * 64
+        with TemporaryDirectory() as cache_dir:
+            cache_path = adapter._cache_path(cache_dir, digest, "Калужская область")
+            with patch.object(
+                adapter, "extract",
+                side_effect=[self._sample_extraction(), self._sample_extraction()],
+            ) as scan:
+                adapter.extract_cached(
+                    "fixture.osm.pbf", cache_dir=cache_dir, source_sha256=digest,
+                    stage_source=False,
+                )
+                cache_path.write_bytes(b"corrupt")
+                rebuilt = adapter.extract_cached(
+                    "fixture.osm.pbf", cache_dir=cache_dir, source_sha256=digest,
+                    stage_source=False,
+                )
+        self.assertEqual(rebuilt.cache_status, "invalid_rebuilt")
+        self.assertEqual(rebuilt.features[0]["osm_id"], 100)
+        self.assertEqual(scan.call_count, 2)
 
 
 if __name__ == "__main__":

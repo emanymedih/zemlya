@@ -3,9 +3,14 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+import os
+import shutil
+import tempfile
+from time import perf_counter
 from typing import Any
 
 from ..sources import GeofabrikPbfIngestor, GeofabrikRoadFeatureAdapter, RosstatOpenDataAdapter
+from ..sources.rosstat import OKTMO_STRUCTURE_URL
 from .contracts import (
     Entity, NormalizedRecord, PipelineBundle, PipelineRun, RawArtifact, Relation, utc_now,
 )
@@ -45,6 +50,41 @@ class UnifiedPipelineRunner:
         self.subject_code = subject_code
         self.require_latest_geofabrik = require_latest_geofabrik
         self._captured_artifacts: list[RawArtifact] = []
+        self._pbf_stage_tempdir: tempfile.TemporaryDirectory[str] | None = None
+        self._pbf_stage_status = "not_started"
+        self._pbf_stage_duration_seconds = 0.0
+        self._pbf_stage_error: str | None = None
+
+    def _prepare_pbf_for_run(self, source_path: Path) -> Path:
+        started = perf_counter()
+        self._pbf_stage_status = "direct_fallback"
+        self._pbf_stage_error = None
+        try:
+            source_size = source_path.stat().st_size
+            required_bytes = source_size + 64 * 1024 * 1024
+            temp_root = Path(os.environ.get("LANDRADAR_PBF_WORK_DIR") or tempfile.gettempdir())
+            temp_root.mkdir(parents=True, exist_ok=True)
+            if shutil.disk_usage(temp_root).free < required_bytes:
+                self._pbf_stage_error = (
+                    f"Temporary storage has less than {required_bytes} bytes free"
+                )
+                self._pbf_stage_duration_seconds = round(perf_counter() - started, 3)
+                return source_path
+            self._pbf_stage_tempdir = tempfile.TemporaryDirectory(
+                prefix="landradar-pbf-", dir=temp_root,
+            )
+            staged_path = Path(self._pbf_stage_tempdir.name) / source_path.name
+            shutil.copyfile(source_path, staged_path)
+            self._pbf_stage_status = "staged"
+            self._pbf_stage_duration_seconds = round(perf_counter() - started, 3)
+            return staged_path
+        except OSError as exc:
+            if self._pbf_stage_tempdir is not None:
+                self._pbf_stage_tempdir.cleanup()
+                self._pbf_stage_tempdir = None
+            self._pbf_stage_error = f"{type(exc).__name__}: {exc}"
+            self._pbf_stage_duration_seconds = round(perf_counter() - started, 3)
+            return source_path
 
     def _capture_rosstat_snapshot(self, snapshot: Any, dataset_id: str) -> None:
         self._captured_artifacts.append(RawArtifact.create(
@@ -65,12 +105,22 @@ class UnifiedPipelineRunner:
         relations: list[Relation] = []
         geofabrik = GeofabrikPbfIngestor(self.geofabrik_root)
         run.source_keys.append("geofabrik_pbf")
-        verification = geofabrik.verify_current()
-        if not verification.get("ok"):
-            raise RuntimeError(f"Geofabrik current release failed: {verification}")
         manifest = geofabrik.current_manifest()
         if manifest is None:
             raise RuntimeError("Geofabrik current manifest is missing")
+        source_pbf_path = (
+            Path(self.geofabrik_root) / "releases" / manifest.release_id
+            / "source.osm.pbf"
+        )
+        pbf_path = self._prepare_pbf_for_run(source_pbf_path)
+        verification = geofabrik.verify_current(pbf_path_override=pbf_path)
+        run.summary["geofabrik_pbf_staging"] = {
+            "status": self._pbf_stage_status,
+            "duration_seconds": self._pbf_stage_duration_seconds,
+            "error": self._pbf_stage_error,
+        }
+        if not verification.get("ok"):
+            raise RuntimeError(f"Geofabrik current release failed: {verification}")
         pbf = manifest.pbf
         pbf_artifact = RawArtifact.create(
             source_key="geofabrik_pbf",
@@ -137,8 +187,11 @@ class UnifiedPipelineRunner:
                 object_id=layer_entity.entity_id,
                 evidence_artifact_id=pbf_artifact.artifact_id,
             ))
-        road_extraction = GeofabrikRoadFeatureAdapter().extract(
-            Path(self.geofabrik_root) / "releases" / manifest.release_id / "source.osm.pbf",
+        road_extraction = GeofabrikRoadFeatureAdapter().extract_cached(
+            verification["path"],
+            cache_dir=Path(self.geofabrik_root) / "derived" / "road-features",
+            source_sha256=pbf_artifact.sha256,
+            stage_source=False,
         )
         boundary_record = NormalizedRecord.create(
             source_key="geofabrik_pbf",
@@ -232,6 +285,17 @@ class UnifiedPipelineRunner:
                 "Per-way metadata coverage is incomplete; use the PBF replication timestamp"
             ),
             "extraction_duration_seconds": road_extraction.extraction_duration_seconds,
+            "extraction_cache_status": road_extraction.cache_status,
+            "extraction_cache_io_duration_seconds": road_extraction.cache_io_duration_seconds,
+            "source_stage_status": road_extraction.source_stage_status,
+            "source_stage_duration_seconds": road_extraction.source_stage_duration_seconds,
+            "source_stage_error": road_extraction.source_stage_error,
+            "extraction_processing_duration_seconds": round(
+                road_extraction.extraction_duration_seconds
+                + road_extraction.cache_io_duration_seconds
+                + road_extraction.source_stage_duration_seconds, 3
+            ),
+            "extraction_cache_write_error": road_extraction.cache_write_error,
             "source_quality_status": "warnings" if road_extraction.source_warnings else "clean",
             "source_quality_warning_count": len(road_extraction.source_warnings),
             "source_quality_warning_counts": [
@@ -267,14 +331,6 @@ class UnifiedPipelineRunner:
         ]
         if not selected:
             raise ValueError(f"Rosstat dataset has no rows for subject code {self.subject_code}")
-        selected_issues = [row for row in selected if row.get("_source_quality_issues")]
-        if selected_issues:
-            first = selected_issues[0]
-            raise ValueError(
-                "Rosstat selected subject contains invalid validity interval: "
-                f"row={first['_source_row_number']} code={first['oktmo_code']} "
-                f"valid_from={first['valid_from']} valid_to={first['valid_to']}"
-            )
         dataset_issues = [row for row in dataset.rows if row.get("_source_quality_issues")]
         publication_date_age_days = None
         if dataset.published_version:
@@ -294,12 +350,12 @@ class UnifiedPipelineRunner:
         for row in selected:
             code = row["oktmo_code"]
             record_key = ":".join((
-                code, row["record_type"], row["valid_from"], row["valid_to"],
+                code, row["section"], row["acceptance_date"], row["introduction_date"],
             ))
             record = NormalizedRecord.create(
                 source_key="rosstat_opendata",
                 dataset_id=dataset.dataset_id,
-                schema_version="rosstat-oktmo-13col/v1",
+                schema_version="rosstat-oktmo-13col/v2",
                 record_key=record_key,
                 artifact_id=csv_artifact.artifact_id,
                 payload=row,
@@ -322,6 +378,7 @@ class UnifiedPipelineRunner:
             "geofabrik_release_id": manifest.release_id,
             "rosstat_dataset_id": dataset.dataset_id,
             "rosstat_data_url": dataset.data_url,
+            "rosstat_structure_url": OKTMO_STRUCTURE_URL,
             "rosstat_published_version": dataset.published_version,
             "rosstat_publication_date_age_days": publication_date_age_days,
             "rosstat_data_fetched_at": csv_snapshot.fetched_at,
@@ -335,8 +392,8 @@ class UnifiedPipelineRunner:
                     "source_row": row["_source_row_number"],
                     "oktmo_code": row["oktmo_code"],
                     "issue": row["_source_quality_issues"][0],
-                    "valid_from": row["valid_from"],
-                    "valid_to": row["valid_to"],
+                    "acceptance_date": row["acceptance_date"],
+                    "introduction_date": row["introduction_date"],
                 }
                 for row in dataset_issues[:20]
             ],
@@ -358,6 +415,10 @@ class UnifiedPipelineRunner:
     def run(self) -> dict[str, Any]:
         run = PipelineRun(source_keys=[])
         self._captured_artifacts = []
+        self._pbf_stage_tempdir = None
+        self._pbf_stage_status = "not_started"
+        self._pbf_stage_duration_seconds = 0.0
+        self._pbf_stage_error = None
         store = PipelineStore(self.database_path)
         try:
             bundle = self._build_bundle(run)
@@ -373,4 +434,9 @@ class UnifiedPipelineRunner:
             store.record_failure(run, exc, artifacts=self._captured_artifacts)
             raise
         finally:
-            store.close()
+            try:
+                store.close()
+            finally:
+                if self._pbf_stage_tempdir is not None:
+                    self._pbf_stage_tempdir.cleanup()
+                    self._pbf_stage_tempdir = None
