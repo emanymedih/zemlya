@@ -38,3 +38,6 @@ jobs:
       - name: Check launcher without PowerShell scripts
         shell: cmd
         run: scripts\run-task04.cmd --help
+      - name: Verify Windows catalog handles and launcher guard
+        shell: cmd
+        run: python -m unittest discover -s tests -p test_docker_launcher.py -v

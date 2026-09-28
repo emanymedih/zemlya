@@ -11,6 +11,39 @@ from scripts import run_task04
 
 
 class DockerLauncherTests(unittest.TestCase):
+    def test_launcher_lock_serializes_and_releases_after_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(ValueError, "forced"):
+                with run_task04.exclusive_launcher_lock(root):
+                    with self.assertRaisesRegex(RuntimeError, "Another catalog launcher"):
+                        with run_task04.exclusive_launcher_lock(root):
+                            pass
+                    raise ValueError("forced")
+            with run_task04.exclusive_launcher_lock(root):
+                self.assertTrue((root / "pipeline" / "launcher.lock").exists())
+
+    def test_existing_volume_blocks_implicit_legacy_host_catalog(self):
+        from subprocess import CompletedProcess
+
+        with patch.object(run_task04.subprocess, "run", return_value=CompletedProcess(
+            args=[], returncode=0, stdout="landradar-catalog\n", stderr="",
+        )):
+            with self.assertRaisesRegex(RuntimeError, "existing Docker catalog"):
+                run_task04.guard_catalog_mode(
+                    use_docker_catalog=False, allow_host_catalog=False,
+                )
+            run_task04.guard_catalog_mode(
+                use_docker_catalog=False, allow_host_catalog=True,
+            )
+            run_task04.guard_catalog_mode(
+                use_docker_catalog=True, allow_host_catalog=False,
+            )
+            with self.assertRaisesRegex(ValueError, "Choose one"):
+                run_task04.guard_catalog_mode(
+                    use_docker_catalog=True, allow_host_catalog=True,
+                )
+
     def test_inspect_backup_closes_sqlite_handle_before_windows_replace(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.sqlite"

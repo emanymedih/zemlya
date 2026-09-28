@@ -16,12 +16,16 @@ def _state(connection: sqlite3.Connection) -> dict:
     if integrity != "ok":
         raise ValueError(f"Catalog integrity check failed: {integrity}")
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version != 1:
+    if version not in (1, 2):
         raise ValueError(f"Unsupported catalog schema version: {version}")
+    foreign_key_issue = connection.execute("PRAGMA foreign_key_check").fetchone()
+    if foreign_key_issue is not None:
+        raise ValueError(f"Catalog foreign key check failed: {foreign_key_issue}")
     pointer = connection.execute(
         "SELECT current_run_id FROM pipeline_state WHERE singleton = 1"
     ).fetchone()
     return {
+        "schema_version": version,
         "current_run_id": pointer[0] if pointer else None,
         "runs": connection.execute("SELECT COUNT(*) FROM pipeline_runs").fetchone()[0],
         "raw_artifacts": connection.execute("SELECT COUNT(*) FROM raw_artifacts").fetchone()[0],
@@ -38,7 +42,23 @@ def seed_catalog(
         raise ValueError("Catalog source and destination must differ")
     if destination.exists() and not replace_existing:
         with closing(sqlite3.connect(f"{destination.resolve().as_uri()}?mode=ro", uri=True)) as current:
-            return {"status": "existing", **_state(current)}
+            state = _state(current)
+            if source.exists():
+                with closing(sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)) as original:
+                    _state(original)
+                    source_runs = {
+                        row[0] for row in original.execute("SELECT run_id FROM pipeline_runs")
+                    }
+                    current_runs = {
+                        row[0] for row in current.execute("SELECT run_id FROM pipeline_runs")
+                    }
+                    missing_runs = source_runs - current_runs
+                    if missing_runs:
+                        raise RuntimeError(
+                            "Host and native catalogs diverged; host has runs missing from "
+                            f"the Docker catalog: {sorted(missing_runs)[:5]}"
+                        )
+            return {"status": "existing", **state}
     if not source.exists():
         if replace_existing:
             raise FileNotFoundError(source)

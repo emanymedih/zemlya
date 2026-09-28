@@ -13,11 +13,13 @@ from typing import Any
 from ..sources import GeofabrikPbfIngestor, GeofabrikRoadFeatureAdapter, RosstatOpenDataAdapter
 from ..sources.rosstat import OKTMO_STRUCTURE_URL, OKTMO_CODINGTABLE_STRUCTURE_URL
 from .contracts import (
-    Entity, NormalizedRecord, PipelineBundle, PipelineRun, RawArtifact, Relation, utc_now,
+    Entity, EntityEvidence, NormalizedRecord, PipelineBundle, PipelineRun,
+    RawArtifact, Relation, utc_now,
 )
 from .store import PipelineStore
 from .oktmo_hierarchy import build_hierarchy, entry_key
 from .oktmo_recode import build_recode_relations, recode_key
+from .quality import assess_source_quality
 
 
 def assess_geofabrik_freshness(
@@ -27,10 +29,9 @@ def assess_geofabrik_freshness(
     age_hours: float | None = None
     if replication_timestamp:
         replicated = datetime.fromisoformat(replication_timestamp.replace("Z", "+00:00"))
-        age_hours = max(
-            0.0,
-            (datetime.now(timezone.utc) - replicated.astimezone(timezone.utc)).total_seconds() / 3600,
-        )
+        age_hours = (
+            datetime.now(timezone.utc) - replicated.astimezone(timezone.utc)
+        ).total_seconds() / 3600
     return {
         "status": status,
         "checked_at": utc_now(),
@@ -130,6 +131,7 @@ class UnifiedPipelineRunner:
         records: list[NormalizedRecord] = []
         entities: list[Entity] = []
         relations: list[Relation] = []
+        extra_entity_evidence: list[EntityEvidence] = []
         geofabrik = GeofabrikPbfIngestor(self.geofabrik_root)
         run.source_keys.append("geofabrik_pbf")
         manifest = geofabrik.current_manifest()
@@ -213,6 +215,7 @@ class UnifiedPipelineRunner:
                 relation_type="contains_layer", subject_id=release_entity.entity_id,
                 object_id=layer_entity.entity_id,
                 evidence_artifact_id=pbf_artifact.artifact_id,
+                evidence_record_id=release_record.record_id,
             ))
         road_extraction = GeofabrikRoadFeatureAdapter().extract_cached(
             verification["path"],
@@ -286,6 +289,7 @@ class UnifiedPipelineRunner:
                 subject_id=road_entity.entity_id,
                 object_id=boundary_entity.entity_id,
                 evidence_artifact_id=pbf_artifact.artifact_id,
+                evidence_record_id=record.record_id,
             ))
         warning_counts = Counter(road_extraction.source_warnings)
         run.summary["geofabrik_road_features"] = {
@@ -388,10 +392,17 @@ class UnifiedPipelineRunner:
             raise ValueError(f"Rosstat OKTMO recode invalid: {recode.summary}")
         dataset_issues = [row for row in dataset.rows if row.get("_source_quality_issues")]
         publication_date_age_days = None
+        codingtable_publication_date_age_days = None
         if dataset.published_version:
             published_date = datetime.strptime(dataset.published_version[:8], "%Y%m%d").date()
             run_date = datetime.fromisoformat(run.started_at).date()
             publication_date_age_days = (run_date - published_date).days
+        if coding_dataset.published_version:
+            published_date = datetime.strptime(
+                coding_dataset.published_version[:8], "%Y%m%d"
+            ).date()
+            run_date = datetime.fromisoformat(run.started_at).date()
+            codingtable_publication_date_age_days = (run_date - published_date).days
         csv_snapshot = next(
             snapshot for snapshot in snapshots if snapshot.source_key.endswith("_data")
         )
@@ -403,6 +414,7 @@ class UnifiedPipelineRunner:
         )
         entities.append(subject)
         code_entities: dict[str, Entity] = {}
+        recode_record_by_pair: dict[tuple[str, str], NormalizedRecord] = {}
         recode_rows = [
             row for row in coding_dataset.rows
             if row["cancelled_code"].startswith(self.subject_code)
@@ -417,12 +429,20 @@ class UnifiedPipelineRunner:
                 payload=row,
             )
             records.append(record)
+            if row.get("valid_code"):
+                pair = (row["cancelled_code"], row["valid_code"])
+                if pair in recode_record_by_pair:
+                    raise ValueError(f"Multiple evidence rows for the same OKTMO replacement: {pair}")
+                recode_record_by_pair[pair] = record
             for code in (row["cancelled_code"], row.get("valid_code", "")):
-                if code and code not in code_entities:
+                if not code:
+                    continue
+                if code not in code_entities:
                     code_entity = Entity.create(
                         entity_type="oktmo_code",
                         canonical_key=code,
                         artifact_id=coding_csv_artifact.artifact_id,
+                        record_id=record.record_id,
                         attributes={
                             "oktmo_code": code,
                             "subject_code": code[:2],
@@ -430,8 +450,16 @@ class UnifiedPipelineRunner:
                     )
                     entities.append(code_entity)
                     code_entities[code] = code_entity
+                else:
+                    extra_entity_evidence.append(EntityEvidence(
+                        entity_id=code_entities[code].entity_id,
+                        artifact_id=coding_csv_artifact.artifact_id,
+                        record_id=record.record_id,
+                        attributes={"oktmo_code": code, "subject_code": code[:2]},
+                    ))
 
         entry_entities: dict[str, Entity] = {}
+        entry_records: dict[str, NormalizedRecord] = {}
         for row in selected:
             record_key = entry_key(row)
             record = NormalizedRecord.create(
@@ -443,6 +471,14 @@ class UnifiedPipelineRunner:
                 payload=row,
             )
             records.append(record)
+            entry_records[record_key] = record
+            if (row["municipality_code"] == row["territory_code"] ==
+                    row["locality_code"] == "000" and row["section"] == "1"):
+                extra_entity_evidence.append(EntityEvidence(
+                    entity_id=subject.entity_id, artifact_id=csv_artifact.artifact_id,
+                    record_id=record.record_id,
+                    attributes={"subject_code": self.subject_code},
+                ))
             entity = Entity.create(
                 entity_type="oktmo_entry",
                 canonical_key=record_key,
@@ -458,6 +494,7 @@ class UnifiedPipelineRunner:
                     entity_type="oktmo_code",
                     canonical_key=code,
                     artifact_id=csv_artifact.artifact_id,
+                    record_id=record.record_id,
                     attributes={
                         "oktmo_code": code,
                         "subject_code": self.subject_code,
@@ -465,16 +502,25 @@ class UnifiedPipelineRunner:
                 )
                 entities.append(code_entity)
                 code_entities[code] = code_entity
+            else:
+                extra_entity_evidence.append(EntityEvidence(
+                    entity_id=code_entities[code].entity_id,
+                    artifact_id=csv_artifact.artifact_id,
+                    record_id=record.record_id,
+                    attributes={"oktmo_code": code, "subject_code": self.subject_code},
+                ))
             relations.append(Relation.create(
                 relation_type="has_oktmo_code",
                 subject_id=entity.entity_id,
                 object_id=code_entities[code].entity_id,
                 evidence_artifact_id=csv_artifact.artifact_id,
+                evidence_record_id=record.record_id,
             ))
             relations.append(Relation.create(
                 relation_type="within_subject", subject_id=entity.entity_id,
                 object_id=subject.entity_id,
                 evidence_artifact_id=csv_artifact.artifact_id,
+                evidence_record_id=record.record_id,
             ))
         for child_key, parent_key in hierarchy.edges:
             relations.append(Relation.create(
@@ -482,6 +528,7 @@ class UnifiedPipelineRunner:
                 subject_id=entry_entities[child_key].entity_id,
                 object_id=entry_entities[parent_key].entity_id,
                 evidence_artifact_id=csv_artifact.artifact_id,
+                evidence_record_id=entry_records[child_key].record_id,
             ))
         for cancelled_code, valid_code in recode.edges:
             relations.append(Relation.create(
@@ -489,6 +536,7 @@ class UnifiedPipelineRunner:
                 subject_id=code_entities[cancelled_code].entity_id,
                 object_id=code_entities[valid_code].entity_id,
                 evidence_artifact_id=coding_csv_artifact.artifact_id,
+                evidence_record_id=recode_record_by_pair[(cancelled_code, valid_code)].record_id,
             ))
         run.summary.update({
             "geofabrik_release_id": manifest.release_id,
@@ -501,11 +549,14 @@ class UnifiedPipelineRunner:
             "rosstat_codingtable_structure_url": OKTMO_CODINGTABLE_STRUCTURE_URL,
             "rosstat_codingtable_published_version": coding_dataset.published_version,
             "rosstat_publication_date_age_days": publication_date_age_days,
+            "rosstat_codingtable_publication_date_age_days": codingtable_publication_date_age_days,
             "rosstat_data_fetched_at": csv_snapshot.fetched_at,
             "rosstat_latest_advertised_file": True,
             "rosstat_total_records": len(dataset.rows),
             "rosstat_selected_records": len(selected),
-            "rosstat_source_quality_status": "warnings" if dataset_issues else "clean",
+            "rosstat_source_quality_status": (
+                "schema_valid_with_warnings" if dataset_issues else "schema_valid"
+            ),
             "rosstat_source_quality_issue_count": len(dataset_issues),
             "rosstat_source_quality_issue_samples": [
                 {
@@ -525,9 +576,13 @@ class UnifiedPipelineRunner:
                 "source_attribution": dataset.passport_url,
             },
         })
+        run.summary["quality_gate"] = assess_source_quality(run.summary, run.code_version)
+        if run.summary["quality_gate"]["status"] != "PASS":
+            raise ValueError(f"Interim core source quality gate failed: {run.summary['quality_gate']}")
         bundle = PipelineBundle(
             run=run, artifacts=artifacts, records=records,
             entities=entities, relations=relations,
+            extra_entity_evidence=extra_entity_evidence,
         )
         bundle.validate()
         return bundle

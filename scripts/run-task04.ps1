@@ -1,9 +1,19 @@
 param(
     [string]$DataDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "geofabrik-worker-data"),
     [string]$Image = "zemlya-radar-geofabrik:task04",
-    [switch]$UseDockerCatalog
+    [switch]$UseDockerCatalog,
+    [switch]$AllowHostCatalog
 )
 $ErrorActionPreference = "Stop"
+$catalogVolume = "landradar-catalog"
+if ($UseDockerCatalog -and $AllowHostCatalog) { throw "Choose one catalog mode" }
+if (-not $UseDockerCatalog) {
+    $volumeNames = @(docker volume ls --format '{{.Name}}' --filter "name=^${catalogVolume}$")
+    if ($LASTEXITCODE -ne 0) { throw "Unable to inspect Docker catalog volumes" }
+    if ($volumeNames -contains $catalogVolume -and -not $AllowHostCatalog) {
+        throw "An existing Docker catalog volume is present. Use -UseDockerCatalog for the active catalog or -AllowHostCatalog for an explicit legacy/diagnostic run."
+    }
+}
 $repo = Split-Path -Parent $PSScriptRoot
 $codeVersion = (git -C $repo rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw "Unable to determine repository commit" }
@@ -14,7 +24,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $database = "/data/pipeline/landradar.sqlite"
 $catalogMount = @()
 if ($UseDockerCatalog) {
-    $catalogMount = @("-v", "landradar-catalog:/catalog")
+    $catalogMount = @("-v", "${catalogVolume}:/catalog")
     docker run --rm --entrypoint python -v ($DataDir + ":/data") @catalogMount $Image -m landradar.pipeline.catalog_migrate --source /data/pipeline/landradar.sqlite --destination /catalog/landradar.sqlite
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $database = "/catalog/landradar.sqlite"

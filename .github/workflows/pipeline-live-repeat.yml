@@ -5,6 +5,9 @@ on:
     paths:
       - .github/workflows/pipeline-live-repeat.yml
       - scripts/run_task04.py
+      - landradar/pipeline/**
+      - landradar/sources/**
+      - tests/fixtures/**
   workflow_dispatch:
 
 permissions:
@@ -45,12 +48,24 @@ jobs:
               assert first['counts'][key] == repeat['counts'][key], key
           for report in (first, repeat):
               assert report['source_summary']['geofabrik_freshness']['status'] == 'current'
+              assert report['source_summary']['quality_gate']['status'] == 'PASS'
+              assert report['source_summary']['quality_gate']['policy_version'] == 'interim-core-quality/v1'
+              assert report['catalog_checks'] == {
+                  'integrity_check': 'ok', 'foreign_key_issues': 0, 'schema_version': 2,
+              }
+              assert report['counts']['relation_record_evidence'] == report['counts']['relations']
           backup = Path('geofabrik-worker-data/pipeline/volume-backup.sqlite')
           with sqlite3.connect(f'{backup.resolve().as_uri()}?mode=ro', uri=True) as db:
               assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
               assert db.execute('SELECT current_run_id FROM pipeline_state').fetchone()[0] == repeat['current_run_id']
               for key in ('normalized_records', 'entities', 'relations'):
                   assert db.execute(f'SELECT COUNT(*) FROM {key}').fetchone()[0] == repeat['counts'][key]
+              assert db.execute('PRAGMA user_version').fetchone()[0] == 2
+              assert db.execute('PRAGMA foreign_key_check').fetchone() is None
+              assert db.execute('SELECT COUNT(*) FROM run_artifact_observations WHERE run_id=?',
+                                (repeat['current_run_id'],)).fetchone()[0] == 5
+              assert db.execute('SELECT COUNT(*) FROM run_relation_evidence WHERE run_id=?',
+                                (repeat['current_run_id'],)).fetchone()[0] == repeat['counts']['relations']
           print('Strict live repeat and exported catalog verified')
           PY
       - name: Save reports

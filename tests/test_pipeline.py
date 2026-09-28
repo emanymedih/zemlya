@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import tempfile
 import threading
 import unittest
@@ -6,10 +7,11 @@ from unittest.mock import patch
 from pathlib import Path
 
 from landradar.pipeline.contracts import (
-    Entity, NormalizedRecord, PipelineBundle, PipelineRun, RawArtifact, Relation,
+    Entity, EntityEvidence, NormalizedRecord, PipelineBundle, PipelineRun,
+    RawArtifact, Relation,
 )
 from landradar.pipeline.catalog_migrate import seed_catalog
-from landradar.pipeline.store import PipelineStore
+from landradar.pipeline.store import PipelineStore, _SCHEMA_V1
 from landradar.pipeline.runner import (
     UnifiedPipelineRunner, assess_geofabrik_freshness,
 )
@@ -49,6 +51,230 @@ def make_bundle(run_id: str) -> PipelineBundle:
 
 
 class PipelineStoreTests(unittest.TestCase):
+    def test_v1_catalog_migrates_without_inventing_historical_fetches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.sqlite"
+            with sqlite3.connect(path) as legacy:
+                legacy.executescript(_SCHEMA_V1)
+                legacy.execute(
+                    "INSERT INTO pipeline_runs VALUES(?,?,?,?,?,?,?,?)",
+                    ("historic-run", "2026-01-01T00:00:00+00:00",
+                     "2026-01-01T00:01:00+00:00", "success", "git:historic",
+                     '["fixture"]', "{}", None),
+                )
+                legacy.execute("INSERT INTO pipeline_state VALUES(1,?)", ("historic-run",))
+            store = PipelineStore(path)
+            try:
+                self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 2)
+                self.assertEqual(store.current_run_id(), "historic-run")
+                self.assertEqual(store.connection.execute(
+                    "SELECT COUNT(*) FROM run_artifact_observations"
+                ).fetchone()[0], 0)
+                store.commit_bundle(make_bundle("new-run"))
+                self.assertEqual(store.connection.execute(
+                    "SELECT COUNT(*) FROM run_artifact_observations"
+                ).fetchone()[0], 1)
+            finally:
+                store.close()
+
+    def test_parser_failure_keeps_current_and_captured_raw_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.sqlite"
+            store = PipelineStore(path)
+            store.commit_bundle(make_bundle("good-run"))
+            store.close()
+            runner = UnifiedPipelineRunner(
+                geofabrik_root=directory, rosstat_raw_dir=directory,
+                database_path=path,
+            )
+
+            def fail_parse(run):
+                run.source_keys.append("fixture")
+                runner._captured_artifacts.append(make_bundle("input").artifacts[0])
+                raise ValueError("invalid publisher CSV")
+
+            with patch.object(runner, "_build_bundle", side_effect=fail_parse):
+                with self.assertRaisesRegex(ValueError, "invalid publisher CSV"):
+                    runner.run()
+            with sqlite3.connect(path) as catalog:
+                self.assertEqual(catalog.execute(
+                    "SELECT current_run_id FROM pipeline_state"
+                ).fetchone()[0], "good-run")
+                failure_id = catalog.execute(
+                    "SELECT run_id FROM pipeline_runs WHERE status='failed'"
+                ).fetchone()[0]
+                self.assertEqual(catalog.execute(
+                    "SELECT COUNT(*) FROM run_artifact_observations WHERE run_id=?",
+                    (failure_id,),
+                ).fetchone()[0], 1)
+
+    def test_same_bytes_keep_per_run_download_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = PipelineStore(Path(directory) / "pipeline.sqlite")
+            try:
+                first = make_bundle("run-1")
+                store.commit_bundle(first)
+                second = make_bundle("run-2")
+                second.artifacts[0] = RawArtifact.create(
+                    source_key="fixture", dataset_id="fixture-v1",
+                    url="https://example.test/new-url", fetched_at="2026-01-02T00:00:00Z",
+                    status_code=200, byte_count=4, sha256="a" * 64,
+                    local_path="fixtures/second-download.bin",
+                )
+                report = store.commit_bundle(second)
+                self.assertEqual(report["artifact_captures"][0]["local_path"],
+                                 "fixtures/second-download.bin")
+                observations = store.connection.execute(
+                    "SELECT run_id,fetched_at,local_path FROM run_artifact_observations ORDER BY fetched_at"
+                ).fetchall()
+                self.assertEqual(observations, [
+                    ("run-1", "2026-01-01T00:00:00Z", "fixtures/data.bin"),
+                    ("run-2", "2026-01-02T00:00:00Z", "fixtures/second-download.bin"),
+                ])
+                self.assertEqual(store.counts()["raw_artifacts"], 1)
+                self.assertEqual(store.connection.execute(
+                    "SELECT fetched_at FROM raw_artifacts"
+                ).fetchone()[0], "2026-01-01T00:00:00Z")
+            finally:
+                store.close()
+
+    def test_same_record_id_with_changed_payload_aborts_and_preserves_pointer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = PipelineStore(Path(directory) / "pipeline.sqlite")
+            try:
+                store.commit_bundle(make_bundle("good-run"))
+                changed = make_bundle("bad-run")
+                original = changed.records[0]
+                changed.records[0] = NormalizedRecord.create(
+                    source_key=original.source_key, dataset_id=original.dataset_id,
+                    schema_version=original.schema_version, record_key=original.record_key,
+                    artifact_id=original.artifact_id, payload={"value": 999},
+                )
+                with self.assertRaisesRegex(ValueError, "Immutable normalized_records"):
+                    store.commit_bundle(changed)
+                self.assertEqual(store.current_run_id(), "good-run")
+                self.assertEqual(store.counts()["runs"], 1)
+                self.assertEqual(json.loads(store.connection.execute(
+                    "SELECT payload_json FROM normalized_records"
+                ).fetchone()[0]), {"value": 1})
+            finally:
+                store.close()
+
+    def test_late_commit_from_older_run_does_not_replace_current(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = PipelineStore(Path(directory) / "pipeline.sqlite")
+            try:
+                newer = make_bundle("newer")
+                newer.run.started_at = "2026-09-28T12:00:01+00:00"
+                older = make_bundle("older")
+                older.run.started_at = "2026-09-28T12:00:00+00:00"
+                store.commit_bundle(newer)
+                with self.assertRaisesRegex(RuntimeError, "pointer backwards"):
+                    store.commit_bundle(older)
+                self.assertEqual(store.current_run_id(), "newer")
+                self.assertEqual(store.counts()["runs"], 1)
+            finally:
+                store.close()
+
+    def test_relation_source_and_record_artifact_alignment_are_required(self):
+        bundle = make_bundle("invalid-alignment")
+        artifact = RawArtifact.create(
+            source_key="other", dataset_id="other", url="https://example.test/other",
+            fetched_at="2026-01-01T00:00:00Z", status_code=200,
+            byte_count=3, sha256="b" * 64, local_path="fixtures/other.bin",
+        )
+        bundle.artifacts.append(artifact)
+        bundle.entities[0] = Entity.create(
+            entity_type=bundle.entities[0].entity_type,
+            canonical_key=bundle.entities[0].canonical_key,
+            artifact_id=artifact.artifact_id,
+            record_id=bundle.records[0].record_id,
+            attributes=bundle.entities[0].attributes,
+        )
+        with self.assertRaisesRegex(ValueError, "record and artifact disagree"):
+            bundle.validate()
+
+        valid = make_bundle("wrong-endpoints")
+        valid.run.source_keys.append("geofabrik_pbf")
+        old = valid.relations[0]
+        valid.relations[0] = Relation.create(
+            relation_type="contains_layer", subject_id=old.subject_id,
+            object_id=old.object_id, evidence_artifact_id=old.evidence_artifact_id,
+            evidence_record_id=valid.records[0].record_id,
+        )
+        with self.assertRaisesRegex(ValueError, "types or evidence source"):
+            valid.validate()
+
+    def test_production_relation_and_extra_entity_evidence_are_row_linked(self):
+        artifact = RawArtifact.create(
+            source_key="geofabrik_pbf", dataset_id="central-fed-district",
+            url="https://example.test/source.osm.pbf", fetched_at="2026-01-01T00:00:00Z",
+            status_code=200, byte_count=4, sha256="c" * 64,
+            local_path="fixtures/source.osm.pbf",
+        )
+        record = NormalizedRecord.create(
+            source_key="geofabrik_pbf", dataset_id="central-fed-district",
+            schema_version="fixture/v1", record_key="release",
+            artifact_id=artifact.artifact_id, payload={"release": "a"},
+        )
+        release = Entity.create(
+            entity_type="osm_release", canonical_key="release",
+            artifact_id=artifact.artifact_id, record_id=record.record_id,
+            attributes={"name": "release"},
+        )
+        layer = Entity.create(
+            entity_type="osm_layer", canonical_key="release:lines",
+            artifact_id=artifact.artifact_id, record_id=record.record_id,
+            attributes={"name": "lines"},
+        )
+        relation = Relation.create(
+            relation_type="contains_layer", subject_id=release.entity_id,
+            object_id=layer.entity_id, evidence_artifact_id=artifact.artifact_id,
+            evidence_record_id=record.record_id,
+        )
+        bundle = PipelineBundle(
+            run=PipelineRun(run_id="row-evidence", source_keys=["geofabrik_pbf"]),
+            artifacts=[artifact], records=[record], entities=[release, layer],
+            relations=[relation],
+            extra_entity_evidence=[EntityEvidence(
+                layer.entity_id, artifact.artifact_id, record.record_id,
+                {"source_role": "row-level"},
+            )],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = PipelineStore(Path(directory) / "catalog.sqlite")
+            try:
+                store.commit_bundle(bundle)
+                self.assertEqual(store.connection.execute(
+                    "SELECT record_id FROM run_relation_evidence"
+                ).fetchone()[0], record.record_id)
+                self.assertEqual(store.connection.execute(
+                    "SELECT COUNT(*) FROM run_entity_observations"
+                ).fetchone()[0], 3)
+                self.assertEqual(store.connection.execute(
+                    "SELECT COUNT(*) FROM pragma_foreign_key_check"
+                ).fetchone()[0], 0)
+            finally:
+                store.close()
+
+        bundle.relations[0] = Relation.create(
+            relation_type="contains_layer", subject_id=release.entity_id,
+            object_id=layer.entity_id, evidence_artifact_id=artifact.artifact_id,
+        )
+        with self.assertRaisesRegex(ValueError, "lacks record evidence"):
+            bundle.validate()
+
+    def test_existing_catalog_rejects_divergent_host_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "host.sqlite"
+            target = Path(directory) / "volume.sqlite"
+            for path, run_id in ((source, "host-only"), (target, "volume-only")):
+                store = PipelineStore(path)
+                store.commit_bundle(make_bundle(run_id))
+                store.close()
+            with self.assertRaisesRegex(RuntimeError, "diverged"):
+                seed_catalog(source, target)
+
     def test_rosstat_datasets_fetch_concurrently_with_independent_adapters(self):
         barrier = threading.Barrier(2, timeout=2)
         instances = []
