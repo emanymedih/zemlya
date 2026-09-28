@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-На 2026-09-28 Docker suite: 54/54 PASS. Он проверяет pipeline, кэш дорог, иерархию и перекодировку ОКТМО, миграцию SQLite и rollback. Свежий выпуск Geofabrik `36d270c5b4b6` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md`, `docs/TASK_07_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`.
+На 2026-09-28 локальный suite: 73/73 PASS, Docker suite на ПК: 72/72 PASS до последнего уточнения контракта (добавлен один регрессионный тест). Свежий выпуск Geofabrik `36d270c5b4b6` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/CORE_QUALITY_GATE_2026-09-28.md`, `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md`, `docs/TASK_07_EVIDENCE.md`.
 
 ## Live worker
 
@@ -98,7 +98,7 @@ Evidence: `docs/TASK_04_EVIDENCE.md`.
 
 ## Task 5 — дорожный слой OSM
 
-Статус: **DONE_WITH_WARNINGS**. Из проверенного Geofabrik PBF извлекаются дороги Калужской области с геометрией, тегами, OSM version/timestamp и provenance. Кэш привязан к исходному SHA-256 и версии адаптера; временные файлы PBF/GDAL можно разместить в Docker volume `/fast`. Результат не подтверждает юридический подъезд к конкретному участку. Для ускорения SQLite доступен режим `scripts\run-task04.cmd --use-docker-catalog` в Windows либо `./scripts/run-task04.ps1 -UseDockerCatalog` при разрешённых PowerShell-скриптах. Перед первым использованием исходная база проверяется и копируется в отдельный volume, исходный файл сохраняется. Launcher `.cmd` требует Docker Desktop, Git и Python 3 (`py -3` либо `python`) в PATH. Резервная копия `geofabrik-worker-data/pipeline/volume-backup.sqlite` проходит проверку хэша и указателя текущего запуска. Статус проверки на ПК: `docs/OPERATIONS_FOLLOWUP_2026-09-28.md`. Подробности Task 5: `docs/TASK_05_EVIDENCE.md`.
+Статус: **DONE_WITH_WARNINGS**. Из проверенного Geofabrik PBF извлекаются дороги Калужской области с геометрией, тегами, OSM version/timestamp и provenance. Кэш привязан к исходному SHA-256 и версии адаптера; временные файлы PBF/GDAL можно разместить в Docker volume `/fast`. Результат не подтверждает юридический подъезд к конкретному участку. Для ускорения SQLite используется `scripts\run-task04.cmd --use-docker-catalog` в Windows. При существующем native volume launcher блокирует случайный запуск в отдельный host-каталог. `.cmd` требует Docker Desktop, Git и Python 3 (`py -3` либо `python`) в PATH и работает при PowerShell `Restricted`. Резервная копия `geofabrik-worker-data/pipeline/volume-backup.sqlite` проходит проверку хэша и указателя текущего запуска. Местный gate и миграция v2: `docs/CORE_QUALITY_GATE_2026-09-28.md`.
 
 
 ## Task 6 — иерархия кодов ОКТМО
