@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-На 2026-09-28 локальный suite: 73/73 PASS, Docker suite на ПК: 72/72 PASS до последнего уточнения контракта (добавлен один регрессионный тест). Свежий выпуск Geofabrik `36d270c5b4b6` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/CORE_QUALITY_GATE_2026-09-28.md`, `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md`, `docs/TASK_07_EVIDENCE.md`.
+На 2026-09-28 локальный и Docker CI suites: 73/73 PASS; Windows launcher CI тоже успешен. Свежий выпуск Geofabrik `36d270c5b4b6` прошёл строгий запуск и повтор на ПК и во внешнем CI. Результаты и ограничения: `docs/CORE_QUALITY_GATE_2026-09-28.md`, `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md`, `docs/TASK_07_EVIDENCE.md`.
 
 ## Live worker
 

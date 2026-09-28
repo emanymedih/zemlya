@@ -67,9 +67,30 @@ zero fabricated capture events. Both launcher exports verified native-source
 and host-copy SHA-256 before replacing `volume-backup.sqlite`.
 
 The Docker test suite on the PC passed 72/72 at `67c9b88`; after the
-Rosstat contract fix the local suite passed 73/73. CI status for the final
-commit is recorded separately once its Docker/Windows and external live
-workflows finish.
+Rosstat contract fix the local suite and Docker CI passed 73/73. Windows CI
+exposed an additional lock-file defect under Python 3.12: a competing lock
+attempt read the byte already locked by the first handle. The launcher now
+locks byte zero without reading it. [Docker and Windows CI on `837e5c9`](https://github.com/emanymedih/zemlya/actions/runs/36424231239)
+both passed. The final local `.cmd` run on the same code commit
+`837e5c9b70e59e21e483ed138649970bfd6d2ca2` passed with run ID
+`378671f4-634b-49e0-864f-fb090be182f0`, identical bundle counts, schema
+v2, quality `PASS`, and exported backup SHA-256
+`a0648fdf412d494d3fad83cb41510f186b8228fff412b6315ec8992e462ec83c`.
+The backup's current pointer matches that run. Its launcher wall time was
+85.12 s including the verified export.
+
+The [external strict live repeat](https://github.com/emanymedih/zemlya/actions/runs/36424231275)
+on the same code commit also passed. Its first run was
+`e717965e-decd-4d54-9fdd-bcdd14e404cc`, repeat
+`17463cc3-907e-4d7a-9143-934148d175c0`. Both reported 5 raw artifacts,
+97,809 records, 101,067 entities, 104,374 relations, 104,106 entity evidence
+observations and 104,374 relation record evidence links, with quality `PASS`
+and catalog schema v2. The verified export matches the repeat pointer,
+`integrity_check=ok` and `foreign_key_check` found no issues. Rosstat parallel
+fetch/parse took 8.368 s and 7.874 s; Geofabrik replication ages were 16.45 h
+and 16.50 h. The [two machine reports](https://github.com/emanymedih/zemlya/actions/runs/36424231275/artifacts/10970942586)
+are retained as the workflow artifact (archive SHA-256
+`50eaaf98aa8047aa77a124fe49bdfe59c6dab5c18d9e6c19454037cebb573898`).
 
 ## Remaining operating boundaries
 
