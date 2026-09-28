@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - .github/workflows/pipeline-live-repeat.yml
+      - scripts/run_task04.py
   workflow_dispatch:
 
 permissions:

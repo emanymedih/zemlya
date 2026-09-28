@@ -107,6 +107,11 @@ def main(argv: list[str] | None = None) -> None:
          "--geofabrik-root", "/data/geofabrik-pbf", "--raw-dir", "/data/pipeline/raw/rosstat",
          "--database", database, "--subject-code", "29",
          "--report", "/data/pipeline/current-report.json")
+    # The container creates atomic reports with mode 0600. On Linux bind mounts
+    # the host user needs read access before it can inspect the successful run.
+    if os.name != "nt":
+        show("docker", "run", "--rm", "--entrypoint", "chmod", "-v", data_mount,
+             args.image, "0644", "/data/pipeline/current-report.json")
     if args.use_docker_catalog:
         current_run_id = json.loads(report.read_text(encoding="utf-8"))["current_run_id"]
         export_catalog(data_dir=data_dir, image=args.image, volume="landradar-catalog",

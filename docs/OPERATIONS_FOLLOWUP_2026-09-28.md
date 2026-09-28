@@ -52,3 +52,15 @@ GitHub Actions `rosstat-parallel-probe.yml` выполнил live-проверк
 того же коммита прошёл: [CI](https://github.com/emanymedih/zemlya/actions/runs/36390239019).
 Полный строгий pipeline с текущим Geofabrik PBF и повтором требует среду
 с доступом к PBF и Docker; live probe проверил только Росстат.
+
+## Сквозной gate на GitHub runner
+
+`pipeline-live-repeat.yml` скачивает publisher-current PBF, выполняет
+строгий pipeline и повтор через launcher с Docker volume, проверяет
+стабильность domain counts и экспортированную SQLite. Первый запуск
+[run 36390703826](https://github.com/emanymedih/zemlya/actions/runs/36390703826)
+показал успешный расчёт первого pipeline (91 512 дорог, 3 281 связь
+иерархии, 3 007 прямых замен), затем выявил право `0600` у атомарно
+записанного JSON-отчёта на Linux bind mount. Launcher после успешного
+запуска теперь открывает отчёт для чтения хостом через Docker `chmod 0644`;
+Windows путь не меняется. Gate требуется повторить на этом исправлении.
