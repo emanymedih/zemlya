@@ -25,7 +25,8 @@ Launcher собирает образ с commit version, проверяет и п
 `current_run_id`, `integrity_check` и SHA-256 native-volume SQLite с копией,
 затем атомарно заменяет `pipeline/volume-backup.sqlite`. При неверном хэше
 предыдущая резервная копия сохраняется. Локальный тест проверяет эти
-сценарии. Сквозной запуск на Windows PC и восстановление из backup ещё
+сценарии. CI запускает `.cmd --help` на Windows runner без PowerShell-скрипта.
+Сквозной запуск на Windows PC и восстановление из backup ещё
 требуют доступ к этому ПК и его существующим volume; из Work-среды они
 не подтверждены.
 

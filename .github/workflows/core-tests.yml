@@ -25,3 +25,16 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/workspace" -w /workspace \
             --entrypoint python zemlya-radar:ci \
             -m unittest discover -s tests -v
+
+  windows-launcher:
+    name: Windows CMD entry point
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check launcher without PowerShell scripts
+        shell: cmd
+        run: scripts\run-task04.cmd --help
