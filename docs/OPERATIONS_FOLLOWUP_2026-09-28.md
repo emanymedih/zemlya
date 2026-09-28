@@ -39,7 +39,15 @@ Launcher собирает образ с commit version, проверяет и п
 HTTP 200 при `If-Modified-Since`. Локальный тест с барьером подтверждает
 одновременность, полный suite — 56/56 PASS. Прямой запрос с этой Work-среды
 вернул HTTP 502 за 7,57 с, поэтому локальный live speedup не измерен.
-GitHub Actions `rosstat-parallel-probe.yml` сохраняет хэши, версии, число
-строк и тайминги для отдельной сетевой проверки. Её результат следует
-сверить после публикации этого коммита. Полный строгий pipeline с текущим
-Geofabrik PBF и повтором также требует среду с доступом к PBF и Docker.
+GitHub Actions `rosstat-parallel-probe.yml` выполнил live-проверку на
+коммите `07cee29`: [workflow run](https://github.com/emanymedih/zemlya/actions/runs/36390238972),
+[machine report](https://github.com/emanymedih/zemlya/actions/runs/36390238972/artifacts/10956167216).
+Версии обоих наборов `data-20260901T1609`; 186 533 строк ОКТМО,
+3 283 строки Калужской области, 81 364 строки таблицы перекодировки;
+все четыре raw ответа получили SHA-256. Загрузка и разбор ОКТМО заняли
+8,187 с, перекодировочной таблицы 3,558 с, общий параллельный этап
+8,189 с. Это один сетевой замер на GitHub runner, сравнение с прежними
+31 секундами на другом ПК не является равным benchmark. Docker unit suite
+того же коммита прошёл: [CI](https://github.com/emanymedih/zemlya/actions/runs/36390239019).
+Полный строгий pipeline с текущим Geofabrik PBF и повтором требует среду
+с доступом к PBF и Docker; live probe проверил только Росстат.
