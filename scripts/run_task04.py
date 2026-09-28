@@ -50,7 +50,8 @@ def guard_catalog_mode(*, use_docker_catalog: bool, allow_host_catalog: bool) ->
 def exclusive_launcher_lock(data_dir: Path):
     lock_path = data_dir / "pipeline" / "launcher.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as handle:
+    lock_path.touch(exist_ok=True)
+    with lock_path.open("r+b") as handle:
         handle.seek(0)
         if not handle.read(1):
             handle.write(b"\0")
