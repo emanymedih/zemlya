@@ -14,6 +14,11 @@ from .base import HttpTransport, RequestsTransport, RawSnapshot, save_raw_snapsh
 OKTMO_PASSPORT_URL = "https://rosstat.gov.ru/opendata/7708234640-oktmo"
 OKTMO_STRUCTURE_VERSION = "20260210T1102"
 OKTMO_STRUCTURE_URL = f"{OKTMO_PASSPORT_URL}/structure-{OKTMO_STRUCTURE_VERSION}.csv"
+OKTMO_CODINGTABLE_PASSPORT_URL = "https://rosstat.gov.ru/opendata/7708234640-codingtable"
+OKTMO_CODINGTABLE_STRUCTURE_VERSION = "20231110T1511"
+OKTMO_CODINGTABLE_STRUCTURE_URL = (
+    f"{OKTMO_CODINGTABLE_PASSPORT_URL}/structure-{OKTMO_CODINGTABLE_STRUCTURE_VERSION}.csv"
+)
 ROSTAT_OPENDATA_TERMS_URL = "https://rosstat.gov.ru/opendata"
 ROSTAT_OPENDATA_USE_TERMS = (
     "Rosstat standard open-data terms: free reuse, including modification and "
@@ -133,6 +138,80 @@ class RosstatOpenDataAdapter:
             result.append(item)
         return result
 
+    @staticmethod
+    def parse_codingtable_csv(payload: bytes) -> list[dict[str, str]]:
+        text: str | None = None
+        for encoding in ("utf-8-sig", "utf-8", "cp1251"):
+            try:
+                text = payload.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            raise ValueError("Unable to decode Rosstat coding table CSV")
+        rows = list(csv.reader(io.StringIO(text), delimiter=";"))
+        if len(rows) < 3:
+            raise ValueError("Rosstat coding table CSV is missing title/header/data rows")
+        result: list[dict[str, str]] = []
+        previous_context: tuple[str, str, str] | None = None
+        for row_number, values in enumerate(rows[2:], start=3):
+            if len(values) < 4 or any(value.strip() for value in values[4:]):
+                raise ValueError(
+                    f"Rosstat coding table row {row_number} has unexpected columns"
+                )
+            subject, cancelled, valid, change = (value.strip() for value in values[:4])
+            continuation = not subject and not cancelled and not change and bool(valid)
+            if continuation:
+                if previous_context is None:
+                    raise ValueError(
+                        f"Rosstat coding table row {row_number}: orphan continuation row"
+                    )
+                subject, cancelled, change = previous_context
+            elif not subject or not cancelled or not change:
+                raise ValueError(
+                    f"Rosstat coding table row {row_number}: incomplete evidence row"
+                )
+
+            def normalize_code(raw: str) -> tuple[str, str]:
+                compact = re.sub(r"\s+", "", raw)
+                note = "*" if compact.endswith("*") else ""
+                if note:
+                    compact = compact[:-1]
+                return compact, note
+
+            cancelled_code, cancelled_note = normalize_code(cancelled)
+            valid_code, valid_note = normalize_code(valid)
+            if re.fullmatch(r"\d{8}|\d{11}", cancelled_code) is None:
+                raise ValueError(
+                    f"Rosstat coding table row {row_number}: invalid cancelled code"
+                )
+            if valid_code and re.fullmatch(r"\d{8}|\d{11}", valid_code) is None:
+                raise ValueError(
+                    f"Rosstat coding table row {row_number}: invalid valid code"
+                )
+            if valid_code == cancelled_code:
+                raise ValueError(
+                    f"Rosstat coding table row {row_number}: replacement equals cancelled code"
+                )
+            if re.fullmatch(r"\d+/\d{4}\s+ОКТМО", change) is None:
+                raise ValueError(
+                    f"Rosstat coding table row {row_number}: invalid change reference"
+                )
+            previous_context = (subject, cancelled, change)
+            result.append({
+                "subject_name": subject,
+                "cancelled_code": cancelled_code,
+                "valid_code": valid_code,
+                "change_reference": change,
+                "cancelled_code_note": cancelled_note,
+                "valid_code_note": valid_note,
+                "_source_continuation": "true" if continuation else "false",
+                "_source_row_number": str(row_number),
+            })
+        if not result:
+            raise ValueError("Rosstat coding table has no data rows")
+        return result
+
     def fetch_dataset(self, *, dataset_id: str, passport_url: str, raw_dir: str,
                       timeout: float = 30.0,
                       on_snapshot: Callable[[RawSnapshot], None] | None = None
@@ -149,6 +228,11 @@ class RosstatOpenDataAdapter:
         data_url = self.resolve_latest_data_url(passport.text, passport.url)
         if dataset_id == "7708234640-oktmo" and f"structure-{OKTMO_STRUCTURE_VERSION}" not in data_url:
             raise ValueError(f"Unknown Rosstat OKTMO structure in {data_url}")
+        if (
+            dataset_id == "7708234640-codingtable"
+            and f"structure-{OKTMO_CODINGTABLE_STRUCTURE_VERSION}" not in data_url
+        ):
+            raise ValueError(f"Unknown Rosstat coding table structure in {data_url}")
         data = self.transport.get(data_url, headers={"Accept": "text/csv,*/*"}, timeout=timeout)
         if data.status_code != 200:
             raise RuntimeError(f"Rosstat data HTTP {data.status_code}: {data.text[:300]}")
@@ -158,7 +242,11 @@ class RosstatOpenDataAdapter:
         )
         if on_snapshot:
             on_snapshot(d_snapshot)
-        rows = self.parse_csv(data.content)
+        rows = (
+            self.parse_codingtable_csv(data.content)
+            if dataset_id == "7708234640-codingtable"
+            else self.parse_csv(data.content)
+        )
         if not rows:
             raise ValueError("Rosstat dataset is empty")
         return RosstatDataset(dataset_id, passport.url, data_url, rows), [p_snapshot, d_snapshot]
@@ -169,6 +257,18 @@ class RosstatOpenDataAdapter:
         return self.fetch_dataset(
             dataset_id="7708234640-oktmo",
             passport_url=OKTMO_PASSPORT_URL,
+            raw_dir=raw_dir,
+            timeout=timeout,
+            on_snapshot=on_snapshot,
+        )
+
+    def fetch_codingtable(
+        self, *, raw_dir: str, timeout: float = 30.0,
+        on_snapshot: Callable[[RawSnapshot], None] | None = None,
+    ) -> tuple[RosstatDataset, list[RawSnapshot]]:
+        return self.fetch_dataset(
+            dataset_id="7708234640-codingtable",
+            passport_url=OKTMO_CODINGTABLE_PASSPORT_URL,
             raw_dir=raw_dir,
             timeout=timeout,
             on_snapshot=on_snapshot,

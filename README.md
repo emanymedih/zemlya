@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-На 2026-09-27 Docker suite: 45/45 PASS. Он проверяет pipeline, кэш дорог, иерархию ОКТМО, миграцию SQLite и rollback. Свежий выпуск Geofabrik `29d06dc7ff03` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`.
+На 2026-09-28 Docker suite: 54/54 PASS. Он проверяет pipeline, кэш дорог, иерархию и перекодировку ОКТМО, миграцию SQLite и rollback. Свежий выпуск Geofabrik `29d06dc7ff03` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`.
 
 ## Live worker
 
@@ -109,3 +109,13 @@ Evidence: `docs/TASK_04_EVIDENCE.md`.
 родителей и циклов прошли без исключений. Это иерархия кодов, не границы
 земельных участков. Подробности: `docs/TASK_06_PLAN.md` и
 `docs/TASK_06_EVIDENCE.md`.
+
+
+## Task 7 — история и перекодировка ОКТМО
+
+Статус: **DONE**. Подключена официальная перекодировочная таблица Росстата.
+Для Калужской области сохранено 3 009 строк evidence и 3 007 прямых
+`oktmo_replaced_by`; 2 аннулирования идут без замены, циклов нет.
+Транзитивная замена автоматически не выводится. Поддержаны 8/11-значные
+коды, continuation rows и source note `*` из федерального CSV.
+Подробности: `docs/TASK_07_PLAN.md` и `docs/TASK_07_EVIDENCE.md`.

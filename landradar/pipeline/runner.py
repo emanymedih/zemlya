@@ -10,12 +10,13 @@ from time import perf_counter
 from typing import Any
 
 from ..sources import GeofabrikPbfIngestor, GeofabrikRoadFeatureAdapter, RosstatOpenDataAdapter
-from ..sources.rosstat import OKTMO_STRUCTURE_URL
+from ..sources.rosstat import OKTMO_STRUCTURE_URL, OKTMO_CODINGTABLE_STRUCTURE_URL
 from .contracts import (
     Entity, NormalizedRecord, PipelineBundle, PipelineRun, RawArtifact, Relation, utc_now,
 )
 from .store import PipelineStore
 from .oktmo_hierarchy import build_hierarchy, entry_key
+from .oktmo_recode import build_recode_relations, recode_key
 
 
 def assess_geofabrik_freshness(
@@ -315,6 +316,17 @@ class UnifiedPipelineRunner:
         run.summary["rosstat_fetch_parse_duration_seconds"] = round(
             perf_counter() - rosstat_started, 3
         )
+        coding_dataset_id = "7708234640-codingtable"
+        coding_started = perf_counter()
+        coding_dataset, coding_snapshots = RosstatOpenDataAdapter().fetch_codingtable(
+            raw_dir=str(self.rosstat_raw_dir),
+            on_snapshot=lambda snapshot: self._capture_rosstat_snapshot(
+                snapshot, coding_dataset_id
+            ),
+        )
+        run.summary["rosstat_codingtable_fetch_parse_duration_seconds"] = round(
+            perf_counter() - coding_started, 3
+        )
         snapshot_artifacts: dict[str, RawArtifact] = {}
         for snapshot in snapshots:
             artifact = RawArtifact.create(
@@ -330,6 +342,23 @@ class UnifiedPipelineRunner:
             artifacts.append(artifact)
             snapshot_artifacts[snapshot.source_key.rsplit("_", 1)[-1]] = artifact
         csv_artifact = snapshot_artifacts["data"]
+        coding_snapshot_artifacts: dict[str, RawArtifact] = {}
+        for snapshot in coding_snapshots:
+            artifact = RawArtifact.create(
+                source_key=snapshot.source_key,
+                dataset_id=coding_dataset.dataset_id,
+                url=snapshot.request_url,
+                fetched_at=snapshot.fetched_at,
+                status_code=snapshot.status_code,
+                byte_count=snapshot.byte_count,
+                sha256=snapshot.sha256,
+                local_path=snapshot.raw_path,
+            )
+            artifacts.append(artifact)
+            coding_snapshot_artifacts[
+                snapshot.source_key.rsplit("_", 1)[-1]
+            ] = artifact
+        coding_csv_artifact = coding_snapshot_artifacts["data"]
         selected = [
             row for row in dataset.rows
             if row.get("subject_code") == self.subject_code
@@ -340,6 +369,14 @@ class UnifiedPipelineRunner:
         run.summary["rosstat_hierarchy"] = hierarchy.summary
         if hierarchy.summary["status"] != "complete":
             raise ValueError(f"Rosstat OKTMO hierarchy invalid: {hierarchy.summary}")
+        recode = build_recode_relations(coding_dataset.rows, self.subject_code)
+        run.summary["rosstat_oktmo_recode"] = recode.summary
+        if recode.summary["selected_rows"] == 0:
+            raise ValueError(
+                f"Rosstat coding table has no rows for subject code {self.subject_code}"
+            )
+        if recode.summary["status"] != "complete":
+            raise ValueError(f"Rosstat OKTMO recode invalid: {recode.summary}")
         dataset_issues = [row for row in dataset.rows if row.get("_source_quality_issues")]
         publication_date_age_days = None
         if dataset.published_version:
@@ -356,6 +393,35 @@ class UnifiedPipelineRunner:
             attributes={"subject_code": self.subject_code},
         )
         entities.append(subject)
+        code_entities: dict[str, Entity] = {}
+        recode_rows = [
+            row for row in coding_dataset.rows
+            if row["cancelled_code"].startswith(self.subject_code)
+        ]
+        for row in recode_rows:
+            record = NormalizedRecord.create(
+                source_key="rosstat_opendata",
+                dataset_id=coding_dataset.dataset_id,
+                schema_version="rosstat-oktmo-codingtable-4col/v1",
+                record_key=recode_key(row),
+                artifact_id=coding_csv_artifact.artifact_id,
+                payload=row,
+            )
+            records.append(record)
+            for code in (row["cancelled_code"], row.get("valid_code", "")):
+                if code and code not in code_entities:
+                    code_entity = Entity.create(
+                        entity_type="oktmo_code",
+                        canonical_key=code,
+                        artifact_id=coding_csv_artifact.artifact_id,
+                        attributes={
+                            "oktmo_code": code,
+                            "subject_code": code[:2],
+                        },
+                    )
+                    entities.append(code_entity)
+                    code_entities[code] = code_entity
+
         entry_entities: dict[str, Entity] = {}
         for row in selected:
             record_key = entry_key(row)
@@ -377,6 +443,25 @@ class UnifiedPipelineRunner:
             )
             entities.append(entity)
             entry_entities[record_key] = entity
+            code = row["oktmo_code"]
+            if code not in code_entities:
+                code_entity = Entity.create(
+                    entity_type="oktmo_code",
+                    canonical_key=code,
+                    artifact_id=csv_artifact.artifact_id,
+                    attributes={
+                        "oktmo_code": code,
+                        "subject_code": self.subject_code,
+                    },
+                )
+                entities.append(code_entity)
+                code_entities[code] = code_entity
+            relations.append(Relation.create(
+                relation_type="has_oktmo_code",
+                subject_id=entity.entity_id,
+                object_id=code_entities[code].entity_id,
+                evidence_artifact_id=csv_artifact.artifact_id,
+            ))
             relations.append(Relation.create(
                 relation_type="within_subject", subject_id=entity.entity_id,
                 object_id=subject.entity_id,
@@ -389,12 +474,23 @@ class UnifiedPipelineRunner:
                 object_id=entry_entities[parent_key].entity_id,
                 evidence_artifact_id=csv_artifact.artifact_id,
             ))
+        for cancelled_code, valid_code in recode.edges:
+            relations.append(Relation.create(
+                relation_type="oktmo_replaced_by",
+                subject_id=code_entities[cancelled_code].entity_id,
+                object_id=code_entities[valid_code].entity_id,
+                evidence_artifact_id=coding_csv_artifact.artifact_id,
+            ))
         run.summary.update({
             "geofabrik_release_id": manifest.release_id,
             "rosstat_dataset_id": dataset.dataset_id,
             "rosstat_data_url": dataset.data_url,
             "rosstat_structure_url": OKTMO_STRUCTURE_URL,
             "rosstat_published_version": dataset.published_version,
+            "rosstat_codingtable_dataset_id": coding_dataset.dataset_id,
+            "rosstat_codingtable_data_url": coding_dataset.data_url,
+            "rosstat_codingtable_structure_url": OKTMO_CODINGTABLE_STRUCTURE_URL,
+            "rosstat_codingtable_published_version": coding_dataset.published_version,
             "rosstat_publication_date_age_days": publication_date_age_days,
             "rosstat_data_fetched_at": csv_snapshot.fetched_at,
             "rosstat_latest_advertised_file": True,
