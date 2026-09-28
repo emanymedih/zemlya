@@ -1,0 +1,62 @@
+name: Strict pipeline live repeat
+
+on:
+  push:
+    paths:
+      - .github/workflows/pipeline-live-repeat.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  strict-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ingest publisher-current Geofabrik PBF
+        run: sh deploy/geofabrik-worker/run-external-docker.sh "$GITHUB_WORKSPACE/geofabrik-worker-data"
+      - name: Prepare writable report directory
+        run: |
+          mkdir -p geofabrik-worker-data/pipeline/raw/rosstat
+          chmod 777 geofabrik-worker-data/pipeline geofabrik-worker-data/pipeline/raw geofabrik-worker-data/pipeline/raw/rosstat
+      - name: Strict pipeline and verified catalog export
+        run: |
+          python scripts/run_task04.py --use-docker-catalog
+          cp geofabrik-worker-data/pipeline/current-report.json first-report.json
+      - name: Same-source repeat and verified catalog export
+        run: |
+          python scripts/run_task04.py --use-docker-catalog
+          cp geofabrik-worker-data/pipeline/current-report.json repeat-report.json
+      - name: Verify repeat and restored catalog contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import sqlite3
+
+          first = json.loads(Path('first-report.json').read_text())
+          repeat = json.loads(Path('repeat-report.json').read_text())
+          assert first['current_run_id'] != repeat['current_run_id']
+          for key in ('normalized_records', 'entities', 'relations'):
+              assert first['counts'][key] == repeat['counts'][key], key
+          for report in (first, repeat):
+              assert report['source_summary']['geofabrik_freshness']['status'] == 'current'
+          backup = Path('geofabrik-worker-data/pipeline/volume-backup.sqlite')
+          with sqlite3.connect(f'{backup.resolve().as_uri()}?mode=ro', uri=True) as db:
+              assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+              assert db.execute('SELECT current_run_id FROM pipeline_state').fetchone()[0] == repeat['current_run_id']
+              for key in ('normalized_records', 'entities', 'relations'):
+                  assert db.execute(f'SELECT COUNT(*) FROM {key}').fetchone()[0] == repeat['counts'][key]
+          print('Strict live repeat and exported catalog verified')
+          PY
+      - name: Save reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-pipeline-reports
+          path: |
+            first-report.json
+            repeat-report.json
+          if-no-files-found: ignore
