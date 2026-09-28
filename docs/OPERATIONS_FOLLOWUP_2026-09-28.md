@@ -64,3 +64,13 @@ GitHub Actions `rosstat-parallel-probe.yml` выполнил live-проверк
 записанного JSON-отчёта на Linux bind mount. Launcher после успешного
 запуска теперь открывает отчёт для чтения хостом через Docker `chmod 0644`;
 Windows путь не меняется. Gate требуется повторить на этом исправлении.
+
+Повторный [run 36391518413](https://github.com/emanymedih/zemlya/actions/runs/36391518413)
+прошёл два строгих pipeline и проверку backup: выпуск Geofabrik
+`36d270c5b4b6`, 97 809 records, 101 067 entities, 104 374 relations
+в каждом bundle; суммарный параллельный этап Росстата 8,914 с и 7,766 с.
+[Отчёты запусков](https://github.com/emanymedih/zemlya/actions/runs/36391518413/artifacts/10955664684).
+Выявлен дефект test harness: промежуточный отчёт в корне checkout пометил
+повторный код как `-dirty`, хотя исполняемый код не менялся. Отчёты перенесены
+в игнорируемый каталог данных; gate теперь проверяет одинаковый `code_version`.
+Нужен финальный прогон этого уточнения evidence.

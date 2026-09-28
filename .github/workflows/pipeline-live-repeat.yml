@@ -25,11 +25,11 @@ jobs:
       - name: Strict pipeline and verified catalog export
         run: |
           python scripts/run_task04.py --use-docker-catalog
-          cp geofabrik-worker-data/pipeline/current-report.json first-report.json
+          cp geofabrik-worker-data/pipeline/current-report.json geofabrik-worker-data/pipeline/first-report.json
       - name: Same-source repeat and verified catalog export
         run: |
           python scripts/run_task04.py --use-docker-catalog
-          cp geofabrik-worker-data/pipeline/current-report.json repeat-report.json
+          cp geofabrik-worker-data/pipeline/current-report.json geofabrik-worker-data/pipeline/repeat-report.json
       - name: Verify repeat and restored catalog contents
         run: |
           python - <<'PY'
@@ -37,9 +37,10 @@ jobs:
           from pathlib import Path
           import sqlite3
 
-          first = json.loads(Path('first-report.json').read_text())
-          repeat = json.loads(Path('repeat-report.json').read_text())
+          first = json.loads(Path('geofabrik-worker-data/pipeline/first-report.json').read_text())
+          repeat = json.loads(Path('geofabrik-worker-data/pipeline/repeat-report.json').read_text())
           assert first['current_run_id'] != repeat['current_run_id']
+          assert first['run']['code_version'] == repeat['run']['code_version']
           for key in ('normalized_records', 'entities', 'relations'):
               assert first['counts'][key] == repeat['counts'][key], key
           for report in (first, repeat):
@@ -58,6 +59,6 @@ jobs:
         with:
           name: strict-pipeline-reports
           path: |
-            first-report.json
-            repeat-report.json
+            geofabrik-worker-data/pipeline/first-report.json
+            geofabrik-worker-data/pipeline/repeat-report.json
           if-no-files-found: ignore
