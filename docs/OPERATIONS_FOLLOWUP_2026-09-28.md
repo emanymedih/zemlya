@@ -59,7 +59,7 @@ GitHub Actions `rosstat-parallel-probe.yml` выполнил live-проверк
 строгий pipeline и повтор через launcher с Docker volume, проверяет
 стабильность domain counts и экспортированную SQLite. Первый запуск
 [run 36390703826](https://github.com/emanymedih/zemlya/actions/runs/36390703826)
-показал успешный расчёт первого pipeline (91 512 дорог, 3 281 связь
+показал успешный расчёт первого pipeline (91 515 дорог, 3 281 связь
 иерархии, 3 007 прямых замен), затем выявил право `0600` у атомарно
 записанного JSON-отчёта на Linux bind mount. Launcher после успешного
 запуска теперь открывает отчёт для чтения хостом через Docker `chmod 0644`;
@@ -90,3 +90,47 @@ artifacts, 97 809 normalized records, 101 067 entities, 104 374 relations.
 [Docker и Windows CMD CI](https://github.com/emanymedih/zemlya/actions/runs/36392349845)
 того же коммита успешны. Сквозной запуск на конкретном Windows ПК и
 восстановление его существующего каталога остаются отдельным местным gate.
+
+## Местный Windows gate — DONE, 2026-09-28
+
+Устройство `PC`, репозиторий `C:\Users\admla\zemlya`, Docker Desktop 29.8.0,
+Python 3.14.0b3, PowerShell execution policy `Restricted`. Рабочее дерево
+перед запуском было чистым и обновлено fast-forward до `main`.
+
+Первый реальный `scripts\run-task04.cmd --use-docker-catalog` подтвердил
+свежесть Geofabrik (publisher MD5 `54090e39e2886ff0e143e793ca178fd3`),
+успешно записал pipeline run `65cc7499-2df5-4929-b177-796b46bb565c`
+в существующий `landradar-catalog`, но экспорт остановился на `WinError 32`.
+Проверка временной SQLite оставляла открытым файловый дескриптор: SQLite
+context manager завершает транзакцию, однако не закрывает соединение.
+Исправление `6941755` использует `contextlib.closing`; регрессионный тест
+проверяет закрытие handle до Windows `os.replace`. Suite: 57/57 PASS,
+[Docker и Windows CI](https://github.com/emanymedih/zemlya/actions/runs/36408395710),
+[strict live repeat](https://github.com/emanymedih/zemlya/actions/runs/36408395741) успешны.
+
+После обновления кода два последовательных местных `.cmd`-запуска
+завершились с exit code 0:
+
+- run `86d3fa02-1cd0-46ec-922e-2d54fc5479f9`, затем
+  `865aa3a0-1cff-4368-a2d7-9d55c5b42314`;
+- `code_version=git:6941755c45472c26a2f2652b6c26c86499c237a5`,
+  Geofabrik `36d270c5b4b6` publisher-current, 91 515 дорог,
+  road cache hit около 0,98 с, 9 ранее учтённых GDAL warnings;
+- каждый bundle: 5 raw artifacts, 97 809 records, 101 067 entities,
+  104 374 relations; параллельный fetch+parse Росстата 4,789 и 4,846 с;
+- после повтора host backup и рабочий native-volume SQLite имеют одинаковый
+  SHA-256 `dcf20182836cdff83d56bff323626c6230c932ff3361f534025ea76e2bae2d53`;
+  native каталог: 14 runs, 21 raw artifacts, 101 094 unique records,
+  101 079 unique entities, 104 384 unique relations, current pointer на
+  повторный run; SQLite integrity `ok`.
+
+Реальное восстановление `volume-backup.sqlite` в отдельный новый Docker
+volume `landradar-catalog-restore-gate-20260928` прошло: `status=seeded`,
+`integrity=ok`, тот же current run и все пять накопленных counts.
+Восстановление через SQLite backup с Windows bind mount заняло 245,39 с;
+это измеренный операционный расход, функционального блокера нет.
+Исходный host `pipeline/landradar.sqlite` остался 20 078 592 байт с прежней
+датой изменения 2026-09-23. Тестовый восстановленный volume сохранён как
+отдельная проверенная копия. Только временный `.tmp` объёмом 277 475 328
+байт от неудачного экспорта удалён после проверки нового backup.
+PowerShell policy не менялась. `main` на ПК чистый и синхронизирован.
