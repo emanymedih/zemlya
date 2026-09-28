@@ -73,4 +73,20 @@ Windows путь не меняется. Gate требуется повторит
 Выявлен дефект test harness: промежуточный отчёт в корне checkout пометил
 повторный код как `-dirty`, хотя исполняемый код не менялся. Отчёты перенесены
 в игнорируемый каталог данных; gate теперь проверяет одинаковый `code_version`.
-Нужен финальный прогон этого уточнения evidence.
+Для этого уточнения выполнен следующий финальный прогон.
+
+Финальный [strict live repeat](https://github.com/emanymedih/zemlya/actions/runs/36392349832)
+на `2d3f0b5` завершился успешно. Выпуск Geofabrik `36d270c5b4b6`
+подтверждён как publisher-current в обоих запусках. Первый run
+`1f506faf-944f-4bf8-9d4d-f93c1490fc93`, повтор
+`f0e63d8f-3d6a-412d-a55e-e26d97ac3be3`. В каждом bundle: 5 raw
+artifacts, 97 809 normalized records, 101 067 entities, 104 374 relations.
+Оба отчёта фиксируют одинаковый чистый `code_version=git:2d3f0b5...`.
+Параллельный этап Росстата: 6,947 с и 6,895 с; отдельно ОКТМО
+6,945 с и 6,893 с, таблица перекодировки 4,004 с и 3,539 с.
+Проверены стабильность domain counts, SQLite `integrity_check=ok`,
+указатель повтора в экспортированном backup и counts его таблиц.
+[Machine reports](https://github.com/emanymedih/zemlya/actions/runs/36392349832/artifacts/10957050812).
+[Docker и Windows CMD CI](https://github.com/emanymedih/zemlya/actions/runs/36392349845)
+того же коммита успешны. Сквозной запуск на конкретном Windows ПК и
+восстановление его существующего каталога остаются отдельным местным gate.
