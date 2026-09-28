@@ -1,0 +1,34 @@
+name: Rosstat parallel live probe
+
+on:
+  push:
+    paths:
+      - landradar/pipeline/runner.py
+      - scripts/probe_rosstat_parallel.py
+      - .github/workflows/rosstat-parallel-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build worker
+        run: docker build -f deploy/geofabrik-worker/Dockerfile -t zemlya-radar:probe .
+      - name: Fetch and validate both Rosstat datasets
+        run: |
+          mkdir -p rosstat-probe
+          docker run --rm -v "${GITHUB_WORKSPACE}:/workspace" -w /workspace \
+            --entrypoint python zemlya-radar:probe \
+            scripts/probe_rosstat_parallel.py /workspace/rosstat-probe
+      - name: Save machine report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rosstat-probe-report
+          path: rosstat-probe/probe-report.json
+          if-no-files-found: ignore

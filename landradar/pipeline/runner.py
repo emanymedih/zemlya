@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 import os
@@ -99,6 +100,30 @@ class UnifiedPipelineRunner:
             sha256=snapshot.sha256,
             local_path=snapshot.raw_path,
         ))
+
+    def _fetch_rosstat_datasets(self) -> tuple[Any, Any, Any, Any, dict[str, float]]:
+        """Fetch independent official datasets concurrently, retaining each raw response."""
+        def fetch(method: str, dataset_id: str) -> tuple[Any, Any, float]:
+            started = perf_counter()
+            adapter = RosstatOpenDataAdapter()  # Each worker owns its HTTP session.
+            result = getattr(adapter, method)(
+                raw_dir=str(self.rosstat_raw_dir),
+                on_snapshot=lambda snapshot: self._capture_rosstat_snapshot(snapshot, dataset_id),
+            )
+            return *result, round(perf_counter() - started, 3)
+
+        started = perf_counter()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            oktmo = pool.submit(fetch, "fetch_oktmo", "7708234640-oktmo")
+            coding = pool.submit(fetch, "fetch_codingtable", "7708234640-codingtable")
+            # Both workers finish before a failed run is recorded, including its raw inputs.
+            dataset, snapshots, oktmo_seconds = oktmo.result()
+            coding_dataset, coding_snapshots, coding_seconds = coding.result()
+        return dataset, snapshots, coding_dataset, coding_snapshots, {
+            "rosstat_fetch_parse_duration_seconds": oktmo_seconds,
+            "rosstat_codingtable_fetch_parse_duration_seconds": coding_seconds,
+            "rosstat_parallel_fetch_parse_duration_seconds": round(perf_counter() - started, 3),
+        }
 
     def _build_bundle(self, run: PipelineRun) -> PipelineBundle:
         artifacts: list[RawArtifact] = []
@@ -307,26 +332,10 @@ class UnifiedPipelineRunner:
             "source_quality_warning_samples": road_extraction.source_warnings[:10],
         }
         run.source_keys.append("rosstat_opendata")
-        dataset_id = "7708234640-oktmo"
-        rosstat_started = perf_counter()
-        dataset, snapshots = RosstatOpenDataAdapter().fetch_oktmo(
-            raw_dir=str(self.rosstat_raw_dir),
-            on_snapshot=lambda snapshot: self._capture_rosstat_snapshot(snapshot, dataset_id),
+        dataset, snapshots, coding_dataset, coding_snapshots, durations = (
+            self._fetch_rosstat_datasets()
         )
-        run.summary["rosstat_fetch_parse_duration_seconds"] = round(
-            perf_counter() - rosstat_started, 3
-        )
-        coding_dataset_id = "7708234640-codingtable"
-        coding_started = perf_counter()
-        coding_dataset, coding_snapshots = RosstatOpenDataAdapter().fetch_codingtable(
-            raw_dir=str(self.rosstat_raw_dir),
-            on_snapshot=lambda snapshot: self._capture_rosstat_snapshot(
-                snapshot, coding_dataset_id
-            ),
-        )
-        run.summary["rosstat_codingtable_fetch_parse_duration_seconds"] = round(
-            perf_counter() - coding_started, 3
-        )
+        run.summary.update(durations)
         snapshot_artifacts: dict[str, RawArtifact] = {}
         for snapshot in snapshots:
             artifact = RawArtifact.create(

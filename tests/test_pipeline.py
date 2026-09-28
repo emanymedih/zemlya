@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -48,6 +49,42 @@ def make_bundle(run_id: str) -> PipelineBundle:
 
 
 class PipelineStoreTests(unittest.TestCase):
+    def test_rosstat_datasets_fetch_concurrently_with_independent_adapters(self):
+        barrier = threading.Barrier(2, timeout=2)
+        instances = []
+
+        class FakeAdapter:
+            def __init__(self):
+                instances.append(self)
+
+            def fetch_oktmo(self, *, raw_dir, on_snapshot):
+                barrier.wait()
+                on_snapshot(type("Snapshot", (), {
+                    "source_key": "rosstat_opendata_7708234640-oktmo_data",
+                    "request_url": "https://example.test/oktmo", "fetched_at": "2026-01-01T00:00:00Z",
+                    "status_code": 200, "byte_count": 1, "sha256": "a" * 64,
+                    "raw_path": raw_dir + "/oktmo.csv",
+                })())
+                return "oktmo", ["oktmo-snapshot"]
+
+            def fetch_codingtable(self, *, raw_dir, on_snapshot):
+                barrier.wait()
+                return "coding", ["coding-snapshot"]
+
+        with tempfile.TemporaryDirectory() as directory:
+            runner = UnifiedPipelineRunner(
+                geofabrik_root=directory, rosstat_raw_dir=directory,
+                database_path=Path(directory) / "catalog.sqlite",
+            )
+            with patch("landradar.pipeline.runner.RosstatOpenDataAdapter", FakeAdapter):
+                oktmo, raw_oktmo, coding, raw_coding, timings = runner._fetch_rosstat_datasets()
+            self.assertEqual((oktmo, raw_oktmo, coding, raw_coding), (
+                "oktmo", ["oktmo-snapshot"], "coding", ["coding-snapshot"],
+            ))
+            self.assertEqual(len(instances), 2)
+            self.assertEqual(len(runner._captured_artifacts), 1)
+            self.assertIn("rosstat_parallel_fetch_parse_duration_seconds", timings)
+
     def test_catalog_seed_preserves_source_and_refuses_to_replace_destination(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "host.sqlite"
