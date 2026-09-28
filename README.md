@@ -58,7 +58,7 @@ audit / conflicts / missing facts
 python -m unittest discover -s tests -v
 ```
 
-На 2026-09-28 Docker suite: 54/54 PASS. Он проверяет pipeline, кэш дорог, иерархию и перекодировку ОКТМО, миграцию SQLite и rollback. Свежий выпуск Geofabrik `29d06dc7ff03` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`.
+На 2026-09-28 Docker suite: 54/54 PASS. Он проверяет pipeline, кэш дорог, иерархию и перекодировку ОКТМО, миграцию SQLite и rollback. Свежий выпуск Geofabrik `36d270c5b4b6` прошёл строгий запуск и повтор. Результаты и ограничения: `docs/TASK_05_EVIDENCE.md`, `docs/TASK_06_EVIDENCE.md`, `docs/TASK_07_EVIDENCE.md` и `docs/TASKS_01_05_AUDIT_2026-09-24.md`.
 
 ## Live worker
 

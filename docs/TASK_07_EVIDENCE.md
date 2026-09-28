@@ -22,18 +22,24 @@
 
 После исправления Docker suite: 54/54 PASS.
 
-## Предварительный strict-run
+## Финальная committed-code проверка
+
+Implementation commit: `a4abcd8c7652`. Docker image собран с
+`LANDRADAR_CODE_VERSION=git:a4abcd8c7652`.
 
 Geofabrik release `36d270c5b4b6`, publisher MD5
 `54090e39e2886ff0e143e793ca178fd3`, SHA-256
 `36d270c5b4b6787bcd1de06d490548773c5e429882ef0c905c236862d8155b20`.
-Run `f99581cf-f9fa-42e9-b973-7ec50a37c7f8` завершён успешно.
-Bundle: 5 raw artifacts, 97 809 normalized records, 101 067 entities,
-104 374 relations.
 
-Machine report:
-`geofabrik-worker-data/task07-validation/strict-recode-report.json`.
+Strict run `7b17df74-9097-4938-8132-43fc512fe941` и повтор
+`865c1342-c1be-41a7-b95f-b1b3577df945` завершены успешно с
+`code_version=git:a4abcd8c7652`. Оба сохранили 3 009 evidence rows,
+3 007 `oktmo_replaced_by`, 2 аннулирования без замены, 0 циклов и
+0 исключений. Bundle каждого запуска: 5 raw artifacts, 97 809 normalized
+records, 101 067 entities, 104 374 relations.
 
-Финальная committed-image проверка выполняется после фиксации implementation
-commit; этот предварительный run не используется как доказательство code version,
-поскольку базовый image ещё содержал предыдущий `LANDRADAR_CODE_VERSION`.
+Финальный SQLite-каталог: 2 успешных pipeline runs, `integrity=ok`,
+current run `865c1342-c1be-41a7-b95f-b1b3577df945`.
+Machine reports:
+`geofabrik-worker-data/task07-validation/strict-recode-final-report.json` и
+`strict-recode-final-repeat-report.json`.
