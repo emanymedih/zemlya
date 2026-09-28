@@ -53,10 +53,6 @@ def exclusive_launcher_lock(data_dir: Path):
     lock_path.touch(exist_ok=True)
     with lock_path.open("r+b") as handle:
         handle.seek(0)
-        if not handle.read(1):
-            handle.write(b"\0")
-            handle.flush()
-        handle.seek(0)
         try:
             if os.name == "nt":
                 import msvcrt
