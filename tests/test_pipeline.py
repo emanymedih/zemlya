@@ -205,6 +205,38 @@ class PipelineStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "types or evidence source"):
             valid.validate()
 
+    def test_rosstat_record_accepts_only_its_dataset_data_snapshot(self):
+        dataset_id = "7708234640-oktmo"
+        csv = RawArtifact.create(
+            source_key=f"rosstat_opendata_{dataset_id}_data", dataset_id=dataset_id,
+            url="https://rosstat.gov.ru/opendata/7708234640-oktmo/data.csv",
+            fetched_at="2026-09-28T00:00:00Z", status_code=200,
+            byte_count=4, sha256="d" * 64, local_path="/raw/oktmo.csv",
+        )
+        row = NormalizedRecord.create(
+            source_key="rosstat_opendata", dataset_id=dataset_id,
+            schema_version="rosstat-oktmo-13col/v3", record_key="row-1",
+            artifact_id=csv.artifact_id, payload={"oktmo_code": "29000000000"},
+        )
+        bundle = PipelineBundle(
+            run=PipelineRun(source_keys=["rosstat_opendata"]),
+            artifacts=[csv], records=[row], entities=[], relations=[],
+        )
+        bundle.validate()
+        wrong = RawArtifact.create(
+            source_key=f"rosstat_opendata_{dataset_id}_passport", dataset_id=dataset_id,
+            url=csv.url, fetched_at=csv.fetched_at, status_code=200,
+            byte_count=4, sha256="e" * 64, local_path="/raw/passport.html",
+        )
+        bundle.artifacts = [wrong]
+        bundle.records = [NormalizedRecord.create(
+            source_key=row.source_key, dataset_id=row.dataset_id,
+            schema_version=row.schema_version, record_key=row.record_key,
+            artifact_id=wrong.artifact_id, payload=row.payload,
+        )]
+        with self.assertRaisesRegex(ValueError, "source/dataset differs"):
+            bundle.validate()
+
     def test_production_relation_and_extra_entity_evidence_are_row_linked(self):
         artifact = RawArtifact.create(
             source_key="geofabrik_pbf", dataset_id="central-fed-district",

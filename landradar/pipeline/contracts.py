@@ -179,7 +179,11 @@ class PipelineBundle:
             if record.artifact_id not in artifact_ids:
                 raise ValueError(f"Record has no raw artifact: {record.record_id}")
             artifact = artifacts[record.artifact_id]
-            if (record.source_key, record.dataset_id) != (artifact.source_key, artifact.dataset_id):
+            source_matches = record.source_key == artifact.source_key or (
+                record.source_key == "rosstat_opendata"
+                and artifact.source_key == f"rosstat_opendata_{record.dataset_id}_data"
+            )
+            if not source_matches or record.dataset_id != artifact.dataset_id:
                 raise ValueError(f"Record source/dataset differs from artifact: {record.record_id}")
             if not record.record_key or not record.schema_version:
                 raise ValueError(f"Record needs key and schema version: {record.record_id}")
