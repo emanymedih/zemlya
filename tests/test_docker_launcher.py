@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,26 @@ from scripts import run_task04
 
 
 class DockerLauncherTests(unittest.TestCase):
+    def test_inspect_backup_closes_sqlite_handle_before_windows_replace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.sqlite"
+            store = PipelineStore(source)
+            store.commit_bundle(make_bundle("run-1"))
+            store.close()
+            opened = []
+            original_connect = sqlite3.connect
+
+            def track_connect(*args, **kwargs):
+                db = original_connect(*args, **kwargs)
+                opened.append(db)
+                return db
+
+            with patch.object(run_task04.sqlite3, "connect", side_effect=track_connect):
+                run_task04.inspect_backup(source, "run-1")
+            self.assertEqual(len(opened), 1)
+            with self.assertRaises(sqlite3.ProgrammingError):
+                opened[0].execute("SELECT 1")
+
     def test_verified_export_replaces_backup_and_keeps_previous_on_checksum_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

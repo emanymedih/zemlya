@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from hashlib import sha256
 import json
 import os
@@ -25,7 +26,9 @@ def show(*args: str) -> None:
 
 
 def inspect_backup(path: Path, expected_run_id: str) -> None:
-    with sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True) as db:
+    # sqlite3's own context manager commits/rolls back but does not close the
+    # connection. Windows refuses os.replace/unlink while that handle is open.
+    with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as db:
         if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise RuntimeError("Copied SQLite catalog failed integrity_check")
         pointer = db.execute(
